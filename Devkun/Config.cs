@@ -7,6 +7,8 @@ using SteamTrade;
 using SteamTrade.TradeOffer;
 using SteamKit2;
 using Newtonsoft.Json;
+using System.Data.SQLite;
+using System.Data.Linq.Mapping;
 
 namespace Devkun
 {
@@ -26,6 +28,43 @@ namespace Devkun
             /// Withdraw meaning we will request items from storage beloning to the user and send them
             /// </summary>
             Withdraw
+        }
+
+
+        /// <summary>
+        /// Enum for trade status type
+        /// </summary>
+        public enum TradeStatusType
+        {
+            /*For deposit*/
+            DepositPending = 1,
+            DepositDeclined = 2,
+            DepositSent = 3,
+            DepositAccepted = 4,
+
+            /*For withdraw*/
+            WithdrawPending = 6,
+            WithdrawDeclined = 7,
+            WithdrawSent = 8,
+            WithdrawAccepted = 9
+        }
+
+
+        /// <summary>
+        /// Class for sorting db response
+        /// </summary>
+        public class ItemSortClass
+        {
+            /// <summary>
+            /// List of items
+            /// </summary>
+            public List<Item> list { get; set; }
+
+
+            /// <summary>
+            /// Owner score
+            /// </summary>
+            public int score { get; set; }
         }
 
 
@@ -60,12 +99,8 @@ namespace Devkun
 
             /// <summary>
             /// Status of trade
-            /// - DEPOSIT
-            /// 1 = Pending, 2 = Declined, 3 = Trade offer sent (include id), 4 = Accepted
-            /// - WITHDRAW
-            /// 6 = Pending, 7 = Declined, 8 = Trade offer sent (include id), 9 = Accepted
             /// </summary>
-            public string Status { get; set; }
+            public TradeStatusType Status { get; set; }
 
 
             /// <summary>
@@ -82,31 +117,36 @@ namespace Devkun
         public class Item
         {
             /// <summary>
+            /// Database ID
+            /// </summary>
+            public int ID { get; set; }
+
+
+            /// <summary>
             /// Inventory asset id
             /// Temporary and is inventory bound
             /// </summary>
-            public string AssetId { get; set; }
+            public long AssetId { get; set; }
 
 
             /// <summary>
             /// Item class id
             /// Stays the same for all items of the same type
             /// </summary>
-            public string ClassId { get; set; }
+            public long ClassId { get; set; }
 
 
             /// <summary>
             /// The bot (storage) that holds the item
             /// Represented as SteamId64
             /// </summary>
-            public string botOwnerSteamId64 { get; set; }
+            public ulong BotOwner { get; set; }
 
 
             /// <summary>
-            /// The user that owns the item
-            /// Represented as SteamId64
+            /// If the item is active, ergo is in our inventory
             /// </summary>
-            public string userOwnerSteamId64 { get; set; }
+            public bool Active { get; set; }
         }
 
 
@@ -119,7 +159,7 @@ namespace Devkun
             /// SteamId of user
             /// </summary>
             [JsonProperty]
-            public string SteamId { get; set; }
+            public ulong SteamId { get; set; }
 
 
             /// <summary>

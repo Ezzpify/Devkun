@@ -10,6 +10,7 @@ using SteamTrade.TradeOffer;
 using System.IO;
 using System.Net;
 using System.Security.Cryptography;
+using System.Collections.Specialized;
 using System.ComponentModel;
 
 namespace Devkun
@@ -50,7 +51,7 @@ namespace Devkun
         /// <summary>
         /// Steam class
         /// </summary>
-        private Steam mSteam = new Steam();
+        public Steam mSteam = new Steam();
 
 
         /// <summary>
@@ -255,7 +256,7 @@ namespace Devkun
             mLog.Write(Log.LogLevel.Success, $"User authenticated! Type: {mBotType}", false);
             mSteam.TradeOfferManager = new TradeOfferManager(mSettings.apiKey, mSteam.Web);
             mSteam.TradeOfferManager.OnNewTradeOffer += TradeOfferManager_OnNewTradeOffer;
-            mSteam.Inventory = new GenericInventory(mSteam.Web);
+            mSteam.Inventory = new SimpleInventory(mSteam.Web);
 
             mSteam.Friends.SetPersonaName(mSettings.displayName);
             mSteam.Friends.SetPersonaState(EPersonaState.Online);
@@ -320,12 +321,14 @@ namespace Devkun
                 }
                 catch (WebException ex)
                 {
-                    mLog.Write(Log.LogLevel.Error, $"{ex.Response}");
+                    string exResp = new StreamReader(ex.Response.GetResponseStream()).ReadToEnd();
+                    mLog.Write(Log.LogLevel.Error, $"Callback webexception: {exResp}");
                     Thread.Sleep(10000);
                 }
                 catch (Exception ex)
                 {
-                    mLog.Write(Log.LogLevel.Error, $"Callback error: {ex}");
+                    mLog.Write(Log.LogLevel.Error, $"Callback exception: {ex}");
+                    Thread.Sleep(10000);
                 }
             }
         }
@@ -343,12 +346,108 @@ namespace Devkun
                 Discord.SendMessage($"{mSettings.displayName} died unexpected! Restarting it...");
                 mBotState = BotState.Disconnected;
             }
+        }
 
-            if (mIsRunning)
+
+        /// <summary>
+        /// Request items from a deposit
+        /// </summary>
+        /// <param name="steamid">User steamid64</param>
+        /// <param name="tradeToken">User trade token</param>
+        /// <param name="message">Message to include in offer</param>
+        /// <param name="itemList">List of item ids</param>
+        /// <returns>Returns empty string if failed, else offerid</returns>
+        public string SendTradeOffer(Config.TradeObject trade, Config.TradeType tradeType, string message)
+        {
+            var offer = mSteam.TradeOfferManager.NewOffer(trade.SteamId);
+            mLogOffer.Write(Log.LogLevel.Debug, $"Created new trade offer to user {trade.SteamId} to {tradeType} with security token {trade.SecurityToken}.");
+
+            foreach (var item in trade.Items)
             {
-                Reconnect();
-                mBotThread.RunWorkerAsync();
+                switch (tradeType)
+                {
+                    /*For deposit we want to add their items*/
+                    case Config.TradeType.Deposit:
+                        offer.Items.AddTheirItem(730, 2, item.AssetId);
+                        mLogOffer.Write(Log.LogLevel.Debug, $"Added their item to trade. Item ID: {item.ClassId}");
+                        break;
+
+                    /*As for withdraw we want to add our items*/
+                    case Config.TradeType.Withdraw:
+                        offer.Items.AddMyItem(730, 2, item.AssetId);
+                        mLogOffer.Write(Log.LogLevel.Debug, $"Added my item to trade. Item ID: {item.ClassId}");
+                        break;
+                }
             }
+                
+            return RequestTradeOffer(offer, trade, message);
+        }
+
+
+        /// <summary>
+        /// Sends trade offer to user
+        /// </summary>
+        /// <param name="offer">Offer to send</param>
+        /// <returns>Returns empty if failed, else offer id</returns>
+        private string RequestTradeOffer(TradeOffer offer, Config.TradeObject trade, string message)
+        {
+            string offerId = string.Empty;
+            
+            for (int i = 0; i < 3; i++)
+            {
+                try
+                {
+                    if (offer.SendWithToken(out offerId, trade.RU_Token, message))
+                    {
+                        mLogOffer.Write(Log.LogLevel.Debug, $"Trade offer sent to user {offer.PartnerSteamId} with id {offerId}");
+                        break;
+                    }
+                }
+                catch (WebException ex)
+                {
+                    var webResponse = new StreamReader(ex.Response.GetResponseStream()).ReadToEnd();
+                    mLogOffer.Write(Log.LogLevel.Error, $"Web error sending offer to {offer.PartnerSteamId} - \nError: {ex.Message}\nResponse: {webResponse}");
+                }
+                catch (Exception ex)
+                {
+                    mLogOffer.Write(Log.LogLevel.Error, $"Exception occured when sending offer to {offer.PartnerSteamId} - \nError: {ex.Message}");
+                }
+
+                mLogOffer.Write(Log.LogLevel.Warn, $"Unable to send trade offer to user {offer.PartnerSteamId} with security token {trade.SecurityToken}. Trying again in 3 seconds.");
+                Thread.Sleep(3000);
+            }
+
+            return offerId;
+        }
+
+
+        /// <summary>
+        /// Reads how many days of escrow the user has
+        /// </summary>
+        /// <param name="trade">Trade object containing user information</param>
+        /// <returns>Returns EscrowDuration class, if failed returns null</returns>
+        public bool UserHasEscrowWaitingPeriod(Config.TradeObject trade)
+        {
+            string url = "https://steamcommunity.com/tradeoffer/new";
+
+            var data = new NameValueCollection();
+            data.Add("partner", trade.SteamId.ToString());
+            data.Add("token", trade.RU_Token);
+
+            string response = mSteam.Web.Fetch(url, "GET", data, false);
+            return Functions.ParseEscrowResponse(response) > 0;
+        }
+
+
+        /// <summary>
+        /// On new trade offer event
+        /// </summary>
+        /// <param name="offer">Tradeoffer passed from event</param>
+        private void TradeOfferManager_OnNewTradeOffer(TradeOffer offer)
+        {
+            /*We should send a very detailed message with the offer and update database after we get it?*/
+            /*Idk*/
+            throw new NotImplementedException();
         }
 
 
@@ -413,6 +512,8 @@ namespace Devkun
 
         /// <summary>
         /// Kills the bot entierly
+        /// There is no fucking way of coming back from this.
+        /// We'll execute it, right inbetween the eyes.
         /// </summary>
         public void Kill()
         {
@@ -426,113 +527,25 @@ namespace Devkun
 
 
         /// <summary>
-        /// Request items from a deposit
-        /// </summary>
-        /// <param name="steamid">User steamid64</param>
-        /// <param name="tradeToken">User trade token</param>
-        /// <param name="message">Message to include in offer</param>
-        /// <param name="itemList">List of item ids</param>
-        /// <returns>Returns empty string if failed, else offerid</returns>
-        public string SendTradeOffer(string steamid, string tradeToken, string message, List<Config.Item> itemList, Config.TradeType tradeType)
-        {
-            ulong steamidu;
-            if (ulong.TryParse(steamid, out steamidu))
-            {
-                var offer = mSteam.TradeOfferManager.NewOffer(steamidu);
-                mLogOffer.Write(Log.LogLevel.Debug, $"Created new trade offer to user {steamid} to deposit.");
-
-                foreach (var item in itemList)
-                {
-                    long itemid;
-                    if (long.TryParse(item.AssetId, out itemid))
-                    {
-                        switch (tradeType)
-                        {
-                            case Config.TradeType.Deposit:
-                                offer.Items.AddTheirItem(730, 2, itemid);
-                                mLogOffer.Write(Log.LogLevel.Debug, $"Added their item to trade. Item ID: {item}");
-                                break;
-                            case Config.TradeType.Withdraw:
-                                offer.Items.AddMyItem(730, 2, itemid);
-                                mLogOffer.Write(Log.LogLevel.Debug, $"Added my item to trade. Item ID: {item}");
-                                break;
-                        }
-                    }
-                    else
-                    {
-                        mLogOffer.Write(Log.LogLevel.Error, $"Unable to parse itemid {item} to user {steamid}");
-                    }
-                }
-                
-                return RequestTradeOffer(offer, tradeToken, message);
-            }
-            
-            return string.Empty;
-        }
-
-
-        /// <summary>
-        /// Sends trade offer to user
-        /// </summary>
-        /// <param name="offer">Offer to send</param>
-        /// <returns>Returns empty if failed, else offer id</returns>
-        private string RequestTradeOffer(TradeOffer offer, string tradeToken, string message)
-        {
-            string offerId = string.Empty;
-
-            try
-            {
-                for (int i = 0; i < 3; i++)
-                {
-                    if (offer.SendWithToken(out offerId, tradeToken, message))
-                    {
-                        mLogOffer.Write(Log.LogLevel.Debug, $"Trade offer sent to user {offer.PartnerSteamId} with id {offerId}");
-                        break;
-                    }
-
-                    mLogOffer.Write(Log.LogLevel.Warn, $"Unable to send trade offer to user {offer.PartnerSteamId}. Trying again in 3 seconds.");
-                    Thread.Sleep(3000);
-                }
-            }
-            catch (WebException ex)
-            {
-                var webResponse = new StreamReader(ex.Response.GetResponseStream()).ReadToEnd();
-                mLogOffer.Write(Log.LogLevel.Error, $"Web error sending offer to {offer.PartnerSteamId} - \nError: {ex.Message}\nResponse: {webResponse}");
-            }
-            catch (Exception ex)
-            {
-                mLogOffer.Write(Log.LogLevel.Error, $"Exception occured when sending offer to {offer.PartnerSteamId} - \nError: {ex.Message}");
-            }
-
-            return offerId;
-        }
-
-
-        /// <summary>
-        /// On new trade offer event
-        /// </summary>
-        /// <param name="offer">Tradeoffer passed from event</param>
-        private void TradeOfferManager_OnNewTradeOffer(TradeOffer offer)
-        {
-            throw new NotImplementedException();
-        }
-
-
-        /// <summary>
         /// Checks the state of a trade offer
         /// The account that sent it needs to be the account checking it
         /// </summary>
         /// <param name="tradeId">Trade id to check</param>
         /// <returns>Returns state of offer</returns>
-        public TradeOfferState GetTradeOfferState(string offerId)
+        public TradeOffer GetTradeOffer(string offerId)
         {
-            TradeOffer offer;
-            mSteam.TradeOfferManager.GetOffer(offerId, out offer);
+            TradeOffer offer = null;
 
-            if (offer != null)
-                return offer.OfferState;
+            try
+            {
+                mSteam.TradeOfferManager.GetOffer(offerId, out offer);
+            }
+            catch (Exception ex)
+            {
+                mLog.Write(Log.LogLevel.Error, $"Error getting trade offer: {ex.Message}");
+            }
 
-            return TradeOfferState.TradeOfferStateUnknown;
+            return offer;
         }
 
 
@@ -543,11 +556,24 @@ namespace Devkun
         /// <returns>Returns true if cancelled</returns>
         public bool CancelTradeOffer(string offerId)
         {
-            TradeOffer offer;
-            mSteam.TradeOfferManager.GetOffer(offerId, out offer);
-
+            TradeOffer offer = GetTradeOffer(offerId);
             if (offer != null)
                 return offer.Cancel();
+
+            return false;
+        }
+
+
+        /// <summary>
+        /// Decline a trade offer by id
+        /// </summary>
+        /// <param name="offerId">Trade offer to decline</param>
+        /// <returns>Returns true if declined</returns>
+        public bool DeclineTradeOffer(string offerId)
+        {
+            TradeOffer offer = GetTradeOffer(offerId);
+            if (offer != null)
+                return offer.Decline();
 
             return false;
         }
@@ -567,32 +593,49 @@ namespace Devkun
         /// Returns bot steam id 64
         /// </summary>
         /// <returns>Returns string</returns>
-        public string GetBotSteamId64()
+        public ulong GetBotSteamId64()
         {
-            return mSteam.Client.SteamID.ConvertToUInt64().ToString();
+            return mSteam.Client.SteamID.ConvertToUInt64();
         }
 
 
         /// <summary>
-        /// Loads the inventory of this bot
+        /// Returns bot inventory
         /// </summary>
-        /// <returns>Returns inventory</returns>
-        public Dictionary<ulong, GenericInventory.Item> GetInventory()
+        /// <param name="reload">If we should reload the inventory or just get the old one</param>
+        /// <returns>Returns simple inventory items list</returns>
+        public List<SimpleInventory.InventoryItem> GetInventory()
         {
-            mSteam.Inventory.loadImplementation(730, new List<long>() { 2 }, mSteam.Client.SteamID);
-            return mSteam.Inventory.items;
+            mSteam.Inventory.Load(GetBotSteamId64(), 730, 2);
+            return mSteam.Inventory.Items;
         }
 
 
         /// <summary>
-        /// Loads the inventory of a user
+        /// Returns inventory of a steam user
         /// </summary>
-        /// <param name="steamId">Steam id of user</param>
-        /// <returns>Returnns items</returns>
-        public Dictionary<ulong, GenericInventory.Item> GetInventory(ulong steamId)
+        /// <param name="steamid">SteamId64 of user</param>
+        /// <returns>Returns simple inventory items list</returns>
+        public List<SimpleInventory.InventoryItem> GetInventory(ulong steamid)
         {
-            mSteam.Inventory.loadImplementation(730, new List<long>() { 2 }, steamId);
-            return mSteam.Inventory.items;
+            mSteam.Inventory.Load(steamid, 730, 2);
+            return mSteam.Inventory.Items;
+        }
+
+
+        /// <summary>
+        /// Returns all pending confirmations
+        /// </summary>
+        /// <returns>List of Confirmation</returns>
+        public void ConfirmTrades()
+        {
+            foreach (var confirmation in mSteam.Auth.GetConfirmationList())
+            {
+                if (confirmation != null)
+                {
+                    mSteam.Auth.mAccount.AcceptConfirmation(confirmation);
+                }
+            }
         }
     }
 }

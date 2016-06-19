@@ -25,6 +25,7 @@ namespace Devkun
             /// </summary>
             public static void CreateLogFolders()
             {
+                Directory.CreateDirectory(Functions.GetStartFolder() + "Database");
                 Directory.CreateDirectory(Functions.GetStartFolder() + "Settings");
                 Directory.CreateDirectory(Functions.GetStartFolder() + "Sentryfiles");
                 Directory.CreateDirectory(Functions.GetStartFolder() + "Logs");

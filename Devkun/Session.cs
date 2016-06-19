@@ -62,7 +62,7 @@ namespace Devkun
         /// <summary>
         /// Session log
         /// </summary>
-        private Log mLog, mLogDatabase;
+        private Log mLog;
 
 
         /// <summary>
@@ -77,13 +77,11 @@ namespace Devkun
             //while (!Discord.mIsConnected) { Thread.Sleep(250); }
 
             mLog = new Log("Session", "Logs\\Session.txt", 3);
-            mLogDatabase = new Log("Database", "Logs\\Database.txt", 3);
-
-            mItemDB = new Database("Items.sqlite");
+            mItemDB = new Database("Database\\Items.sqlite");
             if (!mItemDB.mConnected)
                 return;
 
-            if (AddBots(settings.bots) && StartBots())
+            if (AddBots(settings.bots))
             {
                 /*Find first host bot in our list and assign it as host*/
                 mBotHost = mBotList.FirstOrDefault(o => o.mBotType == Bot.BotType.Host);
@@ -102,7 +100,7 @@ namespace Devkun
                 /*Starts queuue worker thread, this will go through send offers and check their state*/
                 mQueueWorker = new BackgroundWorker { WorkerSupportsCancellation = true };
                 mQueueWorker.DoWork += MQueueWorker_DoWork;
-                mQueueWorker.RunWorkerCompleted += MQueueWorker_RunWorkerCompleted;
+                mQueueWorker.RunWorkerCompleted += MQueueWorkerOnRunWorkerCompleted;
                 mQueueWorker.RunWorkerAsync();
 
                 /*If either of the above dies we want to alert here, and not proceed further*/
@@ -146,19 +144,11 @@ namespace Devkun
                 mBotList.Add(new Bot(bot));
             }
 
-            return mBotList.Count > 0;
-        }
-
-
-        /// <summary>
-        /// Connects all bots to steam
-        /// </summary>
-        /// <returns>Returns true if all bot started</returns>
-        private bool StartBots()
-        {
+            /*Go through all added bots and start them*/
             foreach (var bot in mBotList)
             {
                 bot.Connect();
+
                 while (bot.mBotState != Bot.BotState.Connected)
                 {
                     if (bot.mBotState == Bot.BotState.Error)
@@ -172,7 +162,7 @@ namespace Devkun
                 }
             }
 
-            return true;
+            return mBotList.Count > 0;
         }
 
 
@@ -190,7 +180,7 @@ namespace Devkun
             {
                 if (string.IsNullOrWhiteSpace(tradeJson))
                 {
-                    mLog.Write(Log.LogLevel.Warn, "Website response in TradeWorkerOnDoWork was empty?");
+                    mLog.Write(Log.LogLevel.Warn, $"Website response in TradeWorkerOnDoWork was empty? Resp: {tradeJson}");
                 }
                 else
                 {
@@ -198,35 +188,37 @@ namespace Devkun
                     var trade = JsonConvert.DeserializeObject<Config.Trade>(tradeJson);
 
                     /*Go through all deposit objects*/
-                    foreach (var t in trade.Deposits)
+                    foreach (var deposit in trade.Deposits)
                     {
-                        t.tradeType = Config.TradeType.Deposit;
-                        t.tradeStatus = new Config.TradeStatus() { Id = t.QueId, SteamId = t.SteamId, Status = "1" };
+                        deposit.tradeType = Config.TradeType.Deposit;
+                        deposit.tradeStatus = new Config.TradeStatus() { Id = deposit.QueId, SteamId = deposit.SteamId.ToString(), Status = Config.TradeStatusType.DepositPending};
 
-                        foreach (var item in t.item_Ids)
+                        foreach (var itemStr in deposit.item_Ids)
                         {
-                            /*Since ids come in format assetId;classId we need to manually split them here*/
-                            var iSplit = item.Split(';');
-                            t.Items.Add(new Config.Item() { AssetId = iSplit[0], ClassId = iSplit[1], userOwnerSteamId64 = t.SteamId, botOwnerSteamId64 = mBotHost.GetBotSteamId64() });
+                            /*Split the item string and assign a real item*/
+                            var item = Functions.SplitItem(itemStr);
+                            item.BotOwner = mBotHost.GetBotSteamId64();
+                            deposit.Items.Add(item);
                         }
 
-                        tradeList.Add(t);
+                        tradeList.Add(deposit);
                     }
 
                     /*Go through all withdraw objects*/
-                    foreach (var t in trade.withdrawal)
+                    foreach (var withdraw in trade.withdrawal)
                     {
-                        t.tradeType = Config.TradeType.Withdraw;
-                        t.tradeStatus = new Config.TradeStatus() { Id = t.QueId, SteamId = t.SteamId, Status = "1" };
+                        withdraw.tradeType = Config.TradeType.Withdraw;
+                        withdraw.tradeStatus = new Config.TradeStatus() { Id = withdraw.QueId, SteamId = withdraw.SteamId.ToString(), Status = Config.TradeStatusType.WithdrawPending };
 
-                        foreach (var item in t.item_Ids)
+                        foreach (var itemStr in withdraw.item_Ids)
                         {
-                            /*Same as for deposit*/
-                            var iSplit = item.Split(';');
-                            t.Items.Add(new Config.Item() { AssetId = iSplit[0], ClassId = iSplit[1], userOwnerSteamId64 = t.SteamId, botOwnerSteamId64 = mBotHost.GetBotSteamId64() });
+                            /*Split the item string and assign a real item*/
+                            var item = Functions.SplitItem(itemStr);
+                            item.BotOwner = mBotHost.GetBotSteamId64();
+                            withdraw.Items.Add(item);
                         }
 
-                        tradeList.Add(t);
+                        tradeList.Add(withdraw);
                     }
                 }
             }
@@ -264,6 +256,13 @@ namespace Devkun
                 var tradeList = GetQueue();
                 foreach (var trade in tradeList)
                 {
+                    if (mBotHost.UserHasEscrowWaitingPeriod(trade))
+                    {
+                        mLog.Write(Log.LogLevel.Error, $"User {trade.SteamId} has an escrow waiting period. Will not continue.");
+                        trade.tradeStatus.Status = trade.tradeType == Config.TradeType.Deposit ? Config.TradeStatusType.DepositDeclined : Config.TradeStatusType.WithdrawDeclined;
+                        continue;
+                    }
+
                     switch (trade.tradeType)
                     {
                         case Config.TradeType.Deposit:
@@ -276,10 +275,15 @@ namespace Devkun
                         case Config.TradeType.Withdraw:
                             {
                                 /*Send a withdraw trade to user*/
+                                mLog.Write(Log.LogLevel.Info, $"Sending {trade.SteamId} to Withdraws");
+                                trade.tradeStatus = HandleWithdraw(trade);
                             }
                             break;
                     }
                 }
+
+                /*Authenticate trades*/
+                mBotHost.ConfirmTrades();
 
                 Website.UpdateTrade(tradeList);
                 Thread.Sleep(5000);
@@ -295,21 +299,19 @@ namespace Devkun
         {
             /*Attempt to send the trade offer to user*/
             mLog.Write(Log.LogLevel.Info, $"Attempting to send deposit trade offer to {trade.SteamId}");
-            string offerId = mBotHost.SendTradeOffer(trade.SteamId, trade.RU_Token,
-                $"{EndPoints.Website.DOMAIN.ToUpper()} DEPOSIT | {trade.SecurityToken}",
-                trade.Items, Config.TradeType.Deposit);
+            string offerId = mBotHost.SendTradeOffer(trade, Config.TradeType.Deposit, $"{EndPoints.Website.DOMAIN.ToUpper()} DEPOSIT | {trade.SecurityToken}");
 
             if (string.IsNullOrWhiteSpace(offerId))
             {
                 /*Trade offer id was empty, so that means the offer failed to send*/
                 mLog.Write(Log.LogLevel.Error, $"Deposit trade offer was not sent to user {trade.SteamId}");
-                trade.tradeStatus.Status = "2";
+                trade.tradeStatus.Status = Config.TradeStatusType.DepositDeclined;
             }
             else
             {
                 /*Offer was sent successfully*/
                 mLog.Write(Log.LogLevel.Success, $"Deposit trade offer was sent to user {trade.SteamId}");
-                trade.tradeStatus.Status = "3";
+                trade.tradeStatus.Status = Config.TradeStatusType.DepositSent;
                 trade.tradeStatus.Tradelink = offerId;
                 mActiveTradesList.Add(trade);
             }
@@ -322,9 +324,21 @@ namespace Devkun
         /// Deal with withdraw offers
         /// </summary>
         /// <param name="trade">TradeObject</param>
-        private void HandleWithdraw(Config.TradeObject trade)
+        private Config.TradeStatus HandleWithdraw(Config.TradeObject trade)
         {
+            var itemlistList = new List<List<Config.Item>>();
+            foreach (var item in trade.Items)
+            {
+                itemlistList.Add(mItemDB.FindEntry(Database.DBCols.ClassId, item.ClassId.ToString()));
+            }
+
+            var list = new List<Config.Item>();
+            itemlistList.ForEach(o => list.Add(o.FirstOrDefault()));
             
+            mLog.Write(Log.LogLevel.Info, $"Attempting to send withdraw trade offer to {trade.SteamId}");
+            string offerId = mBotHost.SendTradeOffer(trade, Config.TradeType.Withdraw, $"{EndPoints.Website.DOMAIN.ToUpper()} DEPOSIT | {trade.SecurityToken}");
+
+            return null;
         }
 
         
@@ -337,58 +351,81 @@ namespace Devkun
         {
             while (!mQueueWorker.CancellationPending)
             {
-                var tradeList = new List<Config.TradeObject>();
+                /*Local copy of main list*/
+                var tradeList = mActiveTradesList.ToList();
+
+                /*List of items that will be deleted from main list when this function has run*/
+                var deleteList = new List<Config.TradeObject>();
 
                 /*Go through the active trades list*/
-                foreach (var trade in mActiveTradesList.ToList())
-                {
-                    /*Try to get the trade offer state*/
-                    mLog.Write(Log.LogLevel.Info, $"Checking offer to user {trade.SteamId}");
-                    trade.offerState = mBotHost.GetTradeOfferState(trade.tradeStatus.Tradelink);
-                    mLog.Write(Log.LogLevel.Info, $"Trade offer status: {trade.offerState}");
-
-                    if (trade.offerState == TradeOfferState.TradeOfferStateUnknown
-                        || trade.offerState == TradeOfferState.TradeOfferStateActive)
-                        continue;
-                    
-                    switch (trade.offerState)
-                    {
-                        /*The trade offer was accepted, so we'll set it to accepted here*/
-                        case TradeOfferState.TradeOfferStateAccepted:
-                            trade.tradeStatus.Status = "4";
-                            break;
-
-                        /*Anything but accepted, active or unknown. This means we want to decline it*/
-                        default:
-                            trade.tradeStatus.Status = "2";
-                            break;
-                    }
-
-                    tradeList.Add(trade);
-                }
-
-                /*Go through all the trades that has been changed*/
                 foreach (var trade in tradeList)
                 {
-                    if (trade.offerState == TradeOfferState.TradeOfferStateAccepted)
+                    /*Try to get the trade offer state*/
+                    mLog.Write(Log.LogLevel.Info, $"Checking active {trade.tradeType} trade offer to user {trade.SteamId}");
+                    
+                    /*Get updated trade offer from api*/
+                    TradeOffer offer = mBotHost.GetTradeOffer(trade.tradeStatus.Tradelink);
+                    if (offer == null)
                     {
-                        /*This trade was accepted, so enter the items to the database*/
-                        mItemDB.InsertItem(trade.Items);
-                        mLog.Write(Log.LogLevel.Info, $"Items put in database");
+                        mLog.Write(Log.LogLevel.Warn, $"Trade offer returned null");
+                        continue;
+                    }
+
+                    /*Get the state of the offer*/
+                    mLog.Write(Log.LogLevel.Info, $"Trade offer status: {offer.OfferState}");
+                    trade.offerState = offer.OfferState;
+
+                    if (offer.OfferState == TradeOfferState.TradeOfferStateAccepted)
+                    {
+                        /*Trade offer was accepted, so add the items to the database*/
+                        deleteList.Add(trade);
+                        mItemDB.InsertItems(trade.Items);
+                        mLog.Write(Log.LogLevel.Info, $"Items added to database");
+                        trade.tradeStatus.Status = (trade.tradeType == Config.TradeType.Deposit) ? Config.TradeStatusType.DepositAccepted : Config.TradeStatusType.WithdrawAccepted;
+                    }
+                    else if (offer.OfferState == TradeOfferState.TradeOfferStateActive)
+                    {
+                        /*Check if the age of the offer is older than what we allow*/
+                        /*If it's too old we want to remove it*/
+                        if ((Functions.GetUnixTimestamp() - offer.TimeCreated) > mSettings.tradeOfferExpireTime)
+                        {
+                            deleteList.Add(trade);
+                            mLog.Write(Log.LogLevel.Info, $"Trade offer is too old");
+                            trade.tradeStatus.Status = (trade.tradeType == Config.TradeType.Deposit) ? Config.TradeStatusType.DepositDeclined : Config.TradeStatusType.WithdrawDeclined;
+                        }
                     }
                     else
                     {
-                        /*This means that something else happened to the offer, so we'll cancel it here*/
-                        mLog.Write(Log.LogLevel.Info, $"Trade offer state is {trade.offerState} and we will cancel it.");
-                        mLog.Write(Log.LogLevel.Info, $"Cancel result: {mBotHost.CancelTradeOffer(trade.tradeStatus.Tradelink)}");
+                        /*The offer is whatever, don't care*/
+                        deleteList.Add(trade);
+                        trade.tradeStatus.Status = (trade.tradeType == Config.TradeType.Deposit) ? Config.TradeStatusType.DepositDeclined : Config.TradeStatusType.WithdrawDeclined;
                     }
                 }
-                
-                Website.UpdateTrade(tradeList);
-                Thread.Sleep(5000);
+
+                /*Cancel the offers*/
+                foreach (var trade in deleteList)
+                {
+                    /*Obviously only want to cancel if it hasn't been accepted*/
+                    if (trade.offerState != TradeOfferState.TradeOfferStateAccepted)
+                    {
+                        bool cancelResult = false;
+
+                        if (trade.offerState == TradeOfferState.TradeOfferStateCountered)
+                            /*If the trade offer is countered we need to decline it rather than cancel*/
+                            cancelResult = mBotHost.DeclineTradeOffer(trade.tradeStatus.Tradelink);
+                        else
+                            /*For the rest we can just cancel*/
+                            cancelResult = mBotHost.CancelTradeOffer(trade.tradeStatus.Tradelink);
+
+                        mLog.Write(Log.LogLevel.Info, $"Offer cancel result: {cancelResult}");
+                    }
+                }
 
                 /*Remove all changed offers from the active trade list*/
-                mActiveTradesList = mActiveTradesList.Except(tradeList).ToList();
+                mActiveTradesList = mActiveTradesList.Except(deleteList).ToList();
+
+                Website.UpdateTrade(deleteList);
+                Thread.Sleep(7000);
             }
         }
 
@@ -405,6 +442,8 @@ namespace Devkun
                 mLog.Write(Log.LogLevel.Error, $"Unhandled exception in TradeWorkerBW thread: {e.Error}");
                 //mTradeWorker.RunWorkerAsync();
             }
+
+            mLog.Write(Log.LogLevel.Warn, $"TradeWorkerOnRunWorkerCompleted fired");
         }
 
 
@@ -413,13 +452,15 @@ namespace Devkun
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void MQueueWorker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        private void MQueueWorkerOnRunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
             if (e.Error != null)
             {
                 mLog.Write(Log.LogLevel.Error, $"Unhandled exception in TradeWorkerBW thread: {e.Error}");
                 //mQueueWorker.RunWorkerAsync();
             }
+
+            mLog.Write(Log.LogLevel.Warn, $"MQueueWorkerOnRunWorkerCompleted fired");
         }
     }
 }

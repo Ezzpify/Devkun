@@ -27,6 +27,9 @@ namespace Devkun
         /// <param name="trades">List of trade objects</param>
         public static void UpdateTrade(List<Config.TradeObject> trades)
         {
+            if (trades.Count == 0)
+                return;
+
             var statusHolder = new Config.TradeStatusHolder();
             trades.ForEach(o => statusHolder.Trades.Add(o.tradeStatus));
             UpdateWebTrades(JsonConvert.SerializeObject(statusHolder, Formatting.Indented));

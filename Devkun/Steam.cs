@@ -90,6 +90,6 @@ namespace Devkun
         /// <summary>
         /// Steam inventory
         /// </summary>
-        public GenericInventory Inventory { get; set; }
+        public SimpleInventory Inventory { get; set; }
     }
 }
