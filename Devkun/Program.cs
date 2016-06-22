@@ -11,9 +11,19 @@ namespace Devkun
     class Program
     {
         /// <summary>
-        /// Session variable
+        /// DllImport to catch the exit event
         /// </summary>
-        private static Session mSession;
+        /// <returns>Returns bool</returns>
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetConsoleCtrlHandler(ConsoleEventDelegate callback, bool add);
+
+
+        /// <summary>
+        /// Console event type
+        /// </summary>
+        /// <param name="eventType">Event type</param>
+        /// <returns>Returns bool</returns>
+        private delegate bool ConsoleEventDelegate(int eventType);
 
 
         /// <summary>
@@ -29,19 +39,9 @@ namespace Devkun
 
 
         /// <summary>
-        /// Console event type
+        /// Session variable
         /// </summary>
-        /// <param name="eventType">Event type</param>
-        /// <returns>Returns bool</returns>
-        private delegate bool ConsoleEventDelegate(int eventType);
-
-
-        /// <summary>
-        /// DllImport to catch the exit event
-        /// </summary>
-        /// <returns>Returns bool</returns>
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool SetConsoleCtrlHandler(ConsoleEventDelegate callback, bool add);
+        private static Session mSession;
 
 
         /// <summary>
@@ -58,7 +58,7 @@ namespace Devkun
             if (eventType == 2)
             {
                 Console.WriteLine("\n\n\nClosing...");
-                //Thread.Sleep(1000);
+                Thread.Sleep(500);
             }
 
             return false;
@@ -88,15 +88,8 @@ namespace Devkun
             mSession = new Session(mSettings);
 
             /*When session dies we'll end up here*/
-            Console.WriteLine("\n\n");
-            string exitMessage = "      Press any key to exit the application. ";
-            while (!Console.KeyAvailable)
-            {
-                Console.Write($"\r{exitMessage}");
-                exitMessage = exitMessage.Substring(1, exitMessage.Length - 1) + exitMessage.Substring(0, 1);
-                Thread.Sleep(100);
-            }
-
+            Console.WriteLine("\n\nPress any key to exit the application ...");
+            Console.ReadKey();
             Environment.Exit(1);
         }
     }

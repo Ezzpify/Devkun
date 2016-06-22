@@ -93,7 +93,7 @@ namespace Devkun
         /// </summary>
         private void SaveSGAFile()
         {
-            string fileName = Functions.GetStartFolder() + $"Senntryfiles\\{mAccount.AccountName}.SGA";
+            string fileName = Functions.GetStartFolder() + $"Sentryfiles\\{mAccount.AccountName}.SGA";
             File.WriteAllText(fileName, JsonConvert.SerializeObject(mAccount, Formatting.Indented));
         }
     }

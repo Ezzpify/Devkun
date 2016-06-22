@@ -73,19 +73,19 @@ namespace Devkun
         public static int ParseEscrowResponse(string resp)
         {
             if (string.IsNullOrWhiteSpace(resp))
-                return 1;
+                return 123;
+            
+            var theirDaysRegex = Regex.Match(resp, @"g_daysTheirEscrow(?:[\s=]+)(?<days>[\d]+);", RegexOptions.IgnoreCase);
+            if (!theirDaysRegex.Groups["days"].Success)
+                return 123;
 
-            var myM = Regex.Match(resp, @"g_daysMyEscrow(?:[\s=]+)(?<days>[\d]+);", RegexOptions.IgnoreCase);
-            var theirM = Regex.Match(resp, @"g_daysTheirEscrow(?:[\s=]+)(?<days>[\d]+);", RegexOptions.IgnoreCase);
-            if (!myM.Groups["days"].Success || !theirM.Groups["days"].Success)
-                return 1;
-
-            return int.Parse(theirM.Groups["days"].Value);
+            return int.Parse(theirDaysRegex.Groups["days"].Value);
         }
 
 
         /// <summary>
         /// Sorts the database to find the best items
+        /// This is heavily commented else I'll forget what it does
         /// </summary>
         /// <param name="dbItems">Db item list</param>
         /// <param name="requestItems">Items to find</param>
@@ -119,6 +119,7 @@ namespace Devkun
             sortedList = sortedList.OrderBy(o => o.score).Reverse().ToList();
 
             /*Go through all the requested items*/
+            var busyItems = new List<long>();
             foreach (var requestItem in requestItems)
             {
                 /*We have a local bool here because we'll need to break out of two loops when we find an item*/
@@ -136,9 +137,10 @@ namespace Devkun
                     foreach (var item in owner.list)
                     {
                         /*If the item ids match then we'll add it to the final list and break out of the two loops*/
-                        if (requestItem.ClassId == item.ClassId)
+                        if (requestItem.ClassId == item.ClassId && !busyItems.Contains(item.AssetId))
                         {
                             finalList.Add(item);
+                            busyItems.Add(item.AssetId);
                             dobreak = true;
                             break;
                         }

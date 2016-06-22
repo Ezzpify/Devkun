@@ -34,18 +34,6 @@ namespace Devkun
             trades.ForEach(o => statusHolder.Trades.Add(o.tradeStatus));
             UpdateWebTrades(JsonConvert.SerializeObject(statusHolder, Formatting.Indented));
         }
-
-
-        /// <summary>
-        /// Updates a single trade
-        /// </summary>
-        /// <param name="trade">Trade object</param>
-        public static void UpdateTrade(Config.TradeObject trade)
-        {
-            var statusHolder = new Config.TradeStatusHolder();
-            statusHolder.Trades.Add(trade.tradeStatus);
-            UpdateWebTrades(JsonConvert.SerializeObject(statusHolder, Formatting.Indented));
-        }
         
         
         /// <summary>

@@ -9,18 +9,6 @@ namespace Devkun
     class Log
     {
         /// <summary>
-        /// Name of the log file
-        /// </summary>
-        public string mLogName;
-
-
-        /// <summary>
-        /// Path to the log file
-        /// </summary>
-        private string mLogPath;
-
-
-        /// <summary>
         /// Queue of messages
         /// </summary>
         private List<string> mLogQueue;
@@ -33,6 +21,18 @@ namespace Devkun
 
 
         /// <summary>
+        /// Path to the log file
+        /// </summary>
+        private string mLogPath;
+
+
+        /// <summary>
+        /// Name of the log file
+        /// </summary>
+        public string mLogName;
+
+
+        /// <summary>
         /// LogLevel to specify type of log call
         /// </summary>
         public enum LogLevel
@@ -41,6 +41,7 @@ namespace Devkun
             Info,
             Success,
             Warn,
+            Text,
             Error
         }
 
@@ -89,6 +90,9 @@ namespace Devkun
                     break;
                 case LogLevel.Warn:
                     Console.ForegroundColor = ConsoleColor.Yellow;
+                    break;
+                case LogLevel.Text:
+                    Console.ForegroundColor = ConsoleColor.Magenta;
                     break;
             }
 

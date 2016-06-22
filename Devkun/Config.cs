@@ -144,9 +144,13 @@ namespace Devkun
 
 
             /// <summary>
-            /// If the item is active, ergo is in our inventory
+            /// State of the item in the database
+            /// 0 = Active
+            /// 1 = Sent
+            /// 2 = Accepted by user
+            /// 3 (default) = Item didn't come from Database
             /// </summary>
-            public bool Active { get; set; }
+            public int State { get; set; } = 3;
         }
 
 
@@ -213,6 +217,13 @@ namespace Devkun
             /// Trade offer state
             /// </summary>
             public TradeOfferState offerState { get; set; }
+
+
+            /// <summary>
+            /// How many times we've experienced an error with this trade
+            /// If too many errors occurs we should delete it
+            /// </summary>
+            public int errorCount { get; set; }
         }
 
 

@@ -44,6 +44,30 @@ namespace Devkun
 
 
         /// <summary>
+        /// Item database state
+        /// </summary>
+        public enum ItemState
+        {
+            /// <summary>
+            /// We have the item in our inventory, and it's free to withdraw
+            /// </summary>
+            Active,
+
+
+            /// <summary>
+            /// We have sent the item to a user, but not yet accepted
+            /// </summary>
+            Sent,
+
+
+            /// <summary>
+            /// Item has been accepted by user, this can be moved to history
+            /// </summary>
+            Accepted
+        }
+
+
+        /// <summary>
         /// Our database connection
         /// </summary>
         private SQLiteConnection mSqlCon;
@@ -82,7 +106,8 @@ namespace Devkun
 
                 if (mSqlCon.State == System.Data.ConnectionState.Open)
                 {
-                    Insert("CREATE TABLE IF NOT EXISTS items (ID INTEGER PRIMARY KEY AUTOINCREMENT, BotOwner BIGINT, AssetId BIGINT, ClassId BIGINT, Active BOOLEAN DEFAULT TRUE)");
+                    Insert("CREATE TABLE IF NOT EXISTS items (ID INTEGER PRIMARY KEY AUTOINCREMENT, BotOwner BIGINT, AssetId BIGINT, ClassId BIGINT, ItemState INTEGER DEFAULT 0)");
+                    Insert("CREATE TABLE IF NOT EXISTS useditems (AssetId BIGINT)");
                     mConnected = true;
                 }
             }
@@ -99,52 +124,25 @@ namespace Devkun
         /// <param name="sql">sql query</param>
         private void Insert(string sql)
         {
-            SQLiteCommand command = new SQLiteCommand(sql, mSqlCon);
-            command.ExecuteNonQuery();
+            SQLiteCommand cmd = new SQLiteCommand(sql, mSqlCon);
+            cmd.ExecuteNonQuery();
         }
 
 
         /// <summary>
-        /// Inserts item entry into database
+        /// Inserts an item that has been sent and accepted, this can't be sent twice
         /// </summary>
-        /// <param name="entry">Item entry</param>
-        public void InsertItem(Config.Item entry)
+        /// <param name="ids">List of item asset ids</param>
+        public void InsertUsedItems(List<long> ids)
         {
-            using (var insert = new SQLiteCommand("INSERT INTO items (BotOwner, AssetId, ClassId) values (?, ?, ?)", mSqlCon))
-            {
-                insert.Parameters.AddWithValue("BotOwner", entry.BotOwner);
-                insert.Parameters.AddWithValue("AssetId", entry.AssetId);
-                insert.Parameters.AddWithValue("ClassId", entry.ClassId);
-
-                try
-                {
-                    insert.ExecuteNonQuery();
-                }
-                catch (Exception ex)
-                {
-                    mLog.Write(Log.LogLevel.Error, $"Error inserting item {entry.ClassId} ex: {ex.Message}");
-                }
-            }
-        }
-
-
-        /// <summary>
-        /// Inserts a list of item entries in a transation
-        /// </summary>
-        /// <param name="entries">List of item entries</param>
-        public void InsertItems(List<Config.Item> entries)
-        {
-            using (var insert = new SQLiteCommand("INSERT INTO items (BotOwner, AssetId, ClassId) values (?, ?, ?)", mSqlCon))
+            using (var cmd = new SQLiteCommand("INSERT INTO useditems (AssetId) values (?)", mSqlCon))
             {
                 using (var transaction = mSqlCon.BeginTransaction())
                 {
-                    foreach (var entry in entries)
+                    foreach (var id in ids)
                     {
-                        insert.Parameters.AddWithValue("BotOwner", entry.BotOwner);
-                        insert.Parameters.AddWithValue("AssetId", entry.AssetId);
-                        insert.Parameters.AddWithValue("ClassId", entry.ClassId);
-
-                        insert.ExecuteNonQuery();
+                        cmd.Parameters.AddWithValue("AssetId", id);
+                        cmd.ExecuteNonQuery();
                     }
 
                     try
@@ -161,6 +159,105 @@ namespace Devkun
 
 
         /// <summary>
+        /// Checks if an item exists in our useditems table
+        /// </summary>
+        /// <param name="assetid">assetid of items</param>
+        /// <returns>Returns true if item exist</returns>
+        public bool IsUsedItem(long assetid)
+        {
+            using (var cmd = new SQLiteCommand($"SELECT * FROM useditems WHERE AssetId = '{assetid}'", mSqlCon))
+            {
+                return Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+            }
+        }
+
+
+        /// <summary>
+        /// Inserts item entry into database
+        /// </summary>
+        /// <param name="entry">Item entry</param>
+        public void InsertItem(Config.Item entry)
+        {
+            using (var cmd = new SQLiteCommand("INSERT INTO items (BotOwner, AssetId, ClassId) values (?, ?, ?)", mSqlCon))
+            {
+                cmd.Parameters.AddWithValue("BotOwner", entry.BotOwner);
+                cmd.Parameters.AddWithValue("AssetId", entry.AssetId);
+                cmd.Parameters.AddWithValue("ClassId", entry.ClassId);
+
+                try
+                {
+                    cmd.ExecuteNonQuery();
+                }
+                catch (Exception ex)
+                {
+                    mLog.Write(Log.LogLevel.Error, $"Error inserting item {entry.ClassId} ex: {ex.Message}");
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// Inserts a list of item entries in a transation
+        /// </summary>
+        /// <param name="entries">List of item entries</param>
+        public void InsertItems(List<Config.Item> entries)
+        {
+            using (var cmd = new SQLiteCommand("INSERT INTO items (BotOwner, AssetId, ClassId) values (?, ?, ?)", mSqlCon))
+            {
+                using (var transaction = mSqlCon.BeginTransaction())
+                {
+                    foreach (var entry in entries)
+                    {
+                        cmd.Parameters.AddWithValue("BotOwner", entry.BotOwner);
+                        cmd.Parameters.AddWithValue("AssetId", entry.AssetId);
+                        cmd.Parameters.AddWithValue("ClassId", entry.ClassId);
+
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    try
+                    {
+                        transaction.Commit();
+                    }
+                    catch (Exception ex)
+                    {
+                        mLog.Write(Log.LogLevel.Info, $"Error commiting multiple items ex: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// Updates items in database
+        /// </summary>
+        /// <param name="ids">List of ids that we should update</param>
+        /// <param name="state">What state we should update them to</param>
+        public void UpdateItems(List<int> ids, ItemState state)
+        {
+            using (var transaction = mSqlCon.BeginTransaction())
+            {
+                foreach (var id in ids)
+                {
+                    using (var cmd = new SQLiteCommand($"UPDATE items SET ItemState = {(int)state} WHERE ID = {id}", mSqlCon))
+                    {
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                try
+                {
+                    transaction.Commit();
+                }
+                catch (Exception ex)
+                {
+                    mLog.Write(Log.LogLevel.Info, $"Error updating items ex: {ex.Message}");
+                }
+            }
+        }
+
+
+        /// <summary>
         /// Static find entry function that returns a list of item entries depending on key given
         /// </summary>
         /// <param name="lookup">What column we should match with</param>
@@ -169,20 +266,23 @@ namespace Devkun
         public List<Config.Item> FindEntry(DBCols lookup, string key)
         {
             var itemList = new List<Config.Item>();
-
-            SQLiteCommand command = new SQLiteCommand($"SELECT * FROM items WHERE {lookup} = {key};", mSqlCon);
-            SQLiteDataReader reader = command.ExecuteReader();
-
-            while (reader.Read())
+            
+            using (var cmd = new SQLiteCommand($"SELECT * FROM items WHERE {lookup} = {key} AND ItemState = 0", mSqlCon))
             {
-                itemList.Add(new Config.Item()
+                using (var reader = cmd.ExecuteReader())
                 {
-                    ID = Convert.ToInt32(reader["ID"]),
-                    BotOwner = Convert.ToUInt64(reader["BotOwner"]),
-                    AssetId = Convert.ToInt64(reader["AssetId"]),
-                    ClassId = Convert.ToInt64(reader["ClassId"]),
-                    Active = Convert.ToBoolean(reader["Active"])
-                });
+                    while (reader.Read())
+                    {
+                        itemList.Add(new Config.Item()
+                        {
+                            ID = Convert.ToInt32(reader["ID"]),
+                            BotOwner = Convert.ToUInt64(reader["BotOwner"]),
+                            AssetId = Convert.ToInt64(reader["AssetId"]),
+                            ClassId = Convert.ToInt64(reader["ClassId"]),
+                            State = Convert.ToInt32(reader["ItemState"])
+                        });
+                    }
+                }
             }
 
             mLog.Write(Log.LogLevel.Debug, $"Query returned {itemList.Count} results");

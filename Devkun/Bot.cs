@@ -343,7 +343,6 @@ namespace Devkun
             {
                 Exception ex = runWorkerCompletedEventArgs.Error;
                 mLog.Write(Log.LogLevel.Error, $"Unhandled exceptions in callback thread: {ex}");
-                Discord.SendMessage($"{mSettings.displayName} died unexpected! Restarting it...");
                 mBotState = BotState.Disconnected;
             }
         }
@@ -426,16 +425,33 @@ namespace Devkun
         /// </summary>
         /// <param name="trade">Trade object containing user information</param>
         /// <returns>Returns EscrowDuration class, if failed returns null</returns>
-        public bool UserHasEscrowWaitingPeriod(Config.TradeObject trade)
+        public int GetUserEscrowWaitingPeriod(Config.TradeObject trade)
         {
-            string url = "https://steamcommunity.com/tradeoffer/new";
+            string url = "https://steamcommunity.com/tradeoffer/new/";
+
+            SteamID steamId = new SteamID();
+            steamId.SetFromUInt64(trade.SteamId);
 
             var data = new NameValueCollection();
-            data.Add("partner", trade.SteamId.ToString());
+            data.Add("partner", steamId.AccountID.ToString());
             data.Add("token", trade.RU_Token);
 
-            string response = mSteam.Web.Fetch(url, "GET", data, false);
-            return Functions.ParseEscrowResponse(response) > 0;
+            string response = string.Empty;
+
+            for (int i = 0; i < 3; i++)
+            {
+                try
+                {
+                    response = mSteam.Web.Fetch(url, "GET", data, false);
+                }
+                catch (WebException ex)
+                {
+                    var webResponse = new StreamReader(ex.Response.GetResponseStream()).ReadToEnd();
+                    mLogOffer.Write(Log.LogLevel.Error, $"Web exception when getting user escrow waiting period at {ex.Message}");
+                }
+            }
+
+            return Functions.ParseEscrowResponse(response);
         }
 
 
@@ -607,6 +623,7 @@ namespace Devkun
         public List<SimpleInventory.InventoryItem> GetInventory()
         {
             mSteam.Inventory.Load(GetBotSteamId64(), 730, 2);
+            mLog.Write(Log.LogLevel.Debug, $"Loaded {mSteam.Inventory.Items.Count} items");
             return mSteam.Inventory.Items;
         }
 
@@ -619,7 +636,18 @@ namespace Devkun
         public List<SimpleInventory.InventoryItem> GetInventory(ulong steamid)
         {
             mSteam.Inventory.Load(steamid, 730, 2);
+            mLog.Write(Log.LogLevel.Debug, $"Loaded {mSteam.Inventory.Items.Count} items from {steamid}'s inventory");
             return mSteam.Inventory.Items;
+        }
+
+
+        /// <summary>
+        /// Returns the steam guard login code for the account
+        /// </summary>
+        /// <returns>Returns string</returns>
+        public string GetSteamGuardCode()
+        {
+            return mSteam.Auth.GetSteamGuardCode();
         }
 
 

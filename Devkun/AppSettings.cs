@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
+﻿using System.Collections.Generic;
 
 namespace Devkun
 {
@@ -47,28 +42,21 @@ namespace Devkun
         public class DiscordSettings
         {
             /// <summary>
-            /// Discord login email
+            /// Discord bot token
             /// </summary>
-            public string email { get; set; }
+            public string token { get; set; }
 
 
             /// <summary>
-            /// Discord login password
+            /// Discord display game title
             /// </summary>
-            public string password { get; set; }
+            public string displayGame { get; set; }
 
 
             /// <summary>
-            /// Discord server on which we should operate on
-            /// The bot has to manually join the server before hand
+            /// Discord channel on the server on which we post message to
             /// </summary>
-            public string serverName { get; set; }
-
-
-            /// <summary>
-            /// Discord channel on the server on which we should operate on
-            /// </summary>
-            public string channelName { get; set; }
+            public ulong channelId { get; set; }
         }
 
 
