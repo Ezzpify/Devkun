@@ -127,7 +127,6 @@
     <Compile Include="Discord.cs" />
     <Compile Include="EndPoints.cs" />
     <Compile Include="Functions.cs" />
-    <Compile Include="Inventory.cs" />
     <Compile Include="Log.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
