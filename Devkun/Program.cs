@@ -27,12 +27,6 @@ namespace Devkun
 
 
         /// <summary>
-        /// Application settings
-        /// </summary>
-        private static AppSettings.ApplicationSettings mSettings;
-
-
-        /// <summary>
         /// Console event
         /// </summary>
         private static ConsoleEventDelegate mConsoleEvent;
@@ -78,19 +72,21 @@ namespace Devkun
             mConsoleEvent = new ConsoleEventDelegate(ConsoleEventCallback);
             SetConsoleCtrlHandler(mConsoleEvent, true);
 
-            if ((mSettings = Settings.GetSettings()) == null)
+            AppSettings.ApplicationSettings settings;
+            if ((settings = Settings.GetSettings()) == null)
             {
                 Console.WriteLine($"Wrote new settings file at\n{EndPoints.Application.SETTINGS_FILE_PATH}");
                 Thread.Sleep(1500);
                 return;
             }
             
-            mSession = new Session(mSettings);
+            /*Start our session with the settings we've read
+            The thread will remain at Session until something breaks*/
+            mSession = new Session(settings);
 
-            /*When session dies we'll end up here*/
+            /*When Session dies we'll end up here*/
             Console.WriteLine("\n\nPress any key to exit the application ...");
             Console.ReadKey();
-            Environment.Exit(1);
         }
     }
 }

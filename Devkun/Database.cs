@@ -165,9 +165,22 @@ namespace Devkun
         /// <returns>Returns true if item exist</returns>
         public bool IsUsedItem(long assetid)
         {
-            using (var cmd = new SQLiteCommand($"SELECT * FROM useditems WHERE AssetId = '{assetid}'", mSqlCon))
+            using (var cmd = new SQLiteCommand($"SELECT COUNT(*) FROM useditems WHERE AssetId = '{assetid}'", mSqlCon))
             {
                 return Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+            }
+        }
+
+
+        /// <summary>
+        /// Returns the amount of items in database
+        /// </summary>
+        /// <returns>Returns long</returns>
+        public long GetItemCount()
+        {
+            using (var cmd = new SQLiteCommand($"SELECT COUNT(*) FROM items", mSqlCon))
+            {
+                return Convert.ToInt64(cmd.ExecuteScalar());
             }
         }
 

@@ -31,7 +31,6 @@ namespace Devkun
                 Directory.CreateDirectory(Functions.GetStartFolder() + "Logs");
                 Directory.CreateDirectory(Functions.GetStartFolder() + "Logs\\Bot");
                 Directory.CreateDirectory(Functions.GetStartFolder() + "Logs\\Discord");
-                Directory.CreateDirectory(Functions.GetStartFolder() + "Logs\\Discord\\Channels");
             }
         }
 

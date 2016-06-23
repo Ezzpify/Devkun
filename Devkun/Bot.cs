@@ -15,43 +15,130 @@ using System.ComponentModel;
 
 namespace Devkun
 {
+    /// <summary>
+    /// Class for holding steam information
+    /// </summary>
+    class Steam
+    {
+        /// <summary>
+        /// Path to the sentry file for the account
+        /// </summary>
+        public string sentryPath { get; set; }
+
+
+        /// <summary>
+        /// Web api unique id
+        /// </summary>
+        public string uniqueId { get; set; }
+
+
+        /// <summary>
+        /// Web api nounce
+        /// </summary>
+        public string nounce { get; set; }
+
+
+        /// <summary>
+        /// Our steam client
+        /// </summary>
+        public SteamClient Client { get; set; }
+
+
+        /// <summary>
+        /// Steam trade for trading
+        /// </summary>
+        public SteamTrading Trade { get; set; }
+
+
+        /// <summary>
+        /// Steam callback manger
+        /// </summary>
+        public CallbackManager CallbackManager { get; set; }
+
+
+        /// <summary>
+        /// Steam user
+        /// </summary>
+        public SteamUser User { get; set; }
+
+
+        /// <summary>
+        /// Login details for the account
+        /// </summary>
+        public SteamUser.LogOnDetails logOnDetails { get; set; }
+
+
+        /// <summary>
+        /// Steam friends
+        /// </summary>
+        public SteamFriends Friends { get; set; }
+
+
+        /// <summary>
+        /// Trade offer manager
+        /// </summary>
+        public TradeOfferManager TradeOfferManager { get; set; }
+
+
+        /// <summary>
+        /// Steam web
+        /// </summary>
+        public SteamWeb Web { get; set; }
+
+
+        /// <summary>
+        /// Steam authentication
+        /// </summary>
+        public Authentication Auth { get; set; }
+
+
+        /// <summary>
+        /// Steam inventory
+        /// </summary>
+        public SimpleInventory Inventory { get; set; }
+    }
+
+
+    /// <summary>
+    /// Bot session
+    /// </summary>
     class Bot
     {
         /// <summary>
         /// Bot settingns
         /// </summary>
-        public AppSettings.BotSettings mSettings;
-
-
-        /// <summary>
-        /// What job this bot is assigned
-        /// </summary>
-        public BotType mBotType;
+        public AppSettings.BotSettings mSettings { get; set; }
 
 
         /// <summary>
         /// What state the bot is in
         /// </summary>
-        public BotState mBotState;
+        public BotState mBotState { get; set; }
+
+
+        /// <summary>
+        /// What job this bot is assigned
+        /// </summary>
+        public BotType mBotType { get; set; }
 
 
         /// <summary>
         /// If the bot is in running state
         /// In case of a disconnect it will reconnect if this is true
         /// </summary>
-        public bool mIsRunning;
-
-
-        /// <summary>
-        /// Main bot thread
-        /// </summary>
-        private BackgroundWorker mBotThread;
+        public bool mIsRunning { get; set; }
 
 
         /// <summary>
         /// Steam class
         /// </summary>
-        public Steam mSteam = new Steam();
+        private Steam mSteam { get; set; } = new Steam();
+
+
+        /// <summary>
+        /// Main bot thread
+        /// </summary>
+        private BackgroundWorker mBotThread { get; set; }
 
 
         /// <summary>
@@ -65,8 +152,16 @@ namespace Devkun
         /// </summary>
         public enum BotType
         {
-            Host,
-            Storage
+            /// <summary>
+            /// Host bot will talk to user, taking deposits and sending out withdraws
+            /// </summary>
+            Main = 1,
+
+
+            /// <summary>
+            /// Storage bot will only store items
+            /// </summary>
+            Storage = 2
         }
 
 
@@ -75,9 +170,27 @@ namespace Devkun
         /// </summary>
         public enum BotState
         {
-            None,
+            /// <summary>
+            /// We don't know what the state with this bot is
+            /// </summary>
+            Unknown,
+
+
+            /// <summary>
+            /// An error has occured somewhere and this bot is likely not working
+            /// </summary>
             Error,
+
+
+            /// <summary>
+            /// Bot is currently disconnected from service
+            /// </summary>
             Disconnected,
+
+
+            /// <summary>
+            /// Bot in connected an in working state
+            /// </summary>
             Connected
         }
 
@@ -97,7 +210,8 @@ namespace Devkun
             mSteam.logOnDetails = new SteamUser.LogOnDetails()
             {
                 Username = settings.username,
-                Password = settings.password
+                Password = settings.password,
+                ShouldRememberPassword = true
             };
             mSteam.Web = new SteamWeb();
             ServicePointManager.ServerCertificateValidationCallback += mSteam.Web.ValidateRemoteCertificate;
@@ -391,7 +505,8 @@ namespace Devkun
         private string RequestTradeOffer(TradeOffer offer, Config.TradeObject trade, string message)
         {
             string offerId = string.Empty;
-            
+            string exceptionMsg = string.Empty;
+
             for (int i = 0; i < 3; i++)
             {
                 try
@@ -404,17 +519,20 @@ namespace Devkun
                 }
                 catch (WebException ex)
                 {
-                    var webResponse = new StreamReader(ex.Response.GetResponseStream()).ReadToEnd();
-                    mLogOffer.Write(Log.LogLevel.Error, $"Web error sending offer to {offer.PartnerSteamId} - \nError: {ex.Message}\nResponse: {webResponse}");
+                    string resp = new StreamReader(ex.Response.GetResponseStream()).ReadToEnd();
+                    exceptionMsg = $"Webexeption: {resp}";
                 }
                 catch (Exception ex)
                 {
-                    mLogOffer.Write(Log.LogLevel.Error, $"Exception occured when sending offer to {offer.PartnerSteamId} - \nError: {ex.Message}");
+                    exceptionMsg = $"Exception: {ex.Message}";
                 }
 
-                mLogOffer.Write(Log.LogLevel.Warn, $"Unable to send trade offer to user {offer.PartnerSteamId} with security token {trade.SecurityToken}. Trying again in 3 seconds.");
+                mLogOffer.Write(Log.LogLevel.Warn, $"Unable to send trade offer to user {trade.SteamId}. Trying again in 3 seconds.");
                 Thread.Sleep(3000);
             }
+
+            if (string.IsNullOrWhiteSpace(offerId))
+                mLogOffer.Write(Log.LogLevel.Error, $"Failed to send trade offer to user {trade.SteamId}. Error: {exceptionMsg}");
 
             return offerId;
         }
@@ -494,11 +612,27 @@ namespace Devkun
         /// <summary>
         /// Connect the bot to Steam
         /// </summary>
-        public void Connect()
+        /// <param name="wait">If thread should wait for bot to be connected again</param>
+        public void Connect(bool wait = false)
         {
             mIsRunning = true;
             SteamDirectory.Initialize().Wait();
             mSteam.Client.Connect();
+
+            if (wait)
+            {
+                mLog.Write(Log.LogLevel.Info, $"Waiting for {mSettings.displayName} to connect before resuming thread");
+                while (mBotState != BotState.Connected)
+                {
+                    if (mBotState == BotState.Error)
+                    {
+                        mLog.Write(Log.LogLevel.Error, $"Bot {mSettings.displayName} encountered an error when connecting.");
+                        break;
+                    }
+
+                    Thread.Sleep(250);
+                }
+            }
         }
 
 
@@ -506,21 +640,38 @@ namespace Devkun
         /// Reconnects the bot to Steam
         /// We do this to receive a fresh session
         /// </summary>
-        public void Reconnect()
+        /// <param name="wait">If thread should wait for bot to be connected again</param>
+        public void Reconnect(bool wait = true)
         {
-            mSteam.Client.Disconnect();
-            mLog.Write(Log.LogLevel.Error, "Disconnected from session.");
+            Disconnect(true);
+
+            if (wait)
+            {
+                mLog.Write(Log.LogLevel.Info, $"Waiting for {mSettings.displayName} to connect before resuming thread");
+                while (mBotState != BotState.Connected)
+                {
+                    if (mBotState == BotState.Error)
+                    {
+                        mLog.Write(Log.LogLevel.Error, $"Bot {mSettings.displayName} encountered an error when connecting.");
+                        break;
+                    }
+
+                    Thread.Sleep(250);
+                }
+            }
         }
 
 
         /// <summary>
         /// Disconnects the bot from Steam
         /// </summary>
-        public void Disconnect()
+        /// <param name="retry">If true steam will reconnect</param>
+        public void Disconnect(bool retry = false)
         {
-            mIsRunning = false;
-            mBotState = BotState.Disconnected;
+            if (!retry)
+                mIsRunning = false;
 
+            mBotState = BotState.Disconnected;
             mSteam.Client.Disconnect();
             mLog.Write(Log.LogLevel.Info, "Disconnected from session.");
         }
@@ -661,7 +812,15 @@ namespace Devkun
             {
                 if (confirmation != null)
                 {
-                    mSteam.Auth.mAccount.AcceptConfirmation(confirmation);
+                    try
+                    {
+                        if (mSteam.Auth.mAccount.AcceptConfirmation(confirmation))
+                            mLog.Write(Log.LogLevel.Info, $"Trade offer {confirmation.ConfirmationKey} confirmed");
+                    }
+                    catch (Exception ex)
+                    {
+                        mLog.Write(Log.LogLevel.Warn, $"Exception occured when trying to confirm trade: {ex.Message}");
+                    }
                 }
             }
         }

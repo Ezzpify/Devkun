@@ -48,9 +48,7 @@ namespace Devkun
         public static Config.Item SplitItem(string item)
         {
             string[] itemSpl = item.Split(';');
-
-            long assetId;
-            long classId;
+            long assetId, classId;
 
             if (long.TryParse(itemSpl[0], out assetId) && long.TryParse(itemSpl[1], out classId))
             {
@@ -85,7 +83,8 @@ namespace Devkun
 
         /// <summary>
         /// Sorts the database to find the best items
-        /// This is heavily commented else I'll forget what it does
+        /// This is heavily commented else I'll forget how it works
+        /// Should be relatively easy to figure out what's going on nevertheless
         /// </summary>
         /// <param name="dbItems">Db item list</param>
         /// <param name="requestItems">Items to find</param>
@@ -118,8 +117,11 @@ namespace Devkun
             /*Order the list by their given score*/
             sortedList = sortedList.OrderBy(o => o.score).Reverse().ToList();
 
-            /*Go through all the requested items*/
+            /*List that holds all items that we already used
+            This is to prevent the same item being used twice*/
             var busyItems = new List<long>();
+
+            /*Go through all the requested items*/
             foreach (var requestItem in requestItems)
             {
                 /*We have a local bool here because we'll need to break out of two loops when we find an item*/
@@ -136,7 +138,8 @@ namespace Devkun
                     /*Go through all the items that the BotOwner has*/
                     foreach (var item in owner.list)
                     {
-                        /*If the item ids match then we'll add it to the final list and break out of the two loops*/
+                        /*If the item ids match and the item hasn't been used already 
+                        then we'll add it to the final list and break out of the two loops*/
                         if (requestItem.ClassId == item.ClassId && !busyItems.Contains(item.AssetId))
                         {
                             finalList.Add(item);

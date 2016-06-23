@@ -80,10 +80,8 @@ namespace Devkun
 
             /// <summary>
             /// Represents what job the bot has
-            /// 0 = None
-            /// 1 = Withdraw
-            /// 2 = Deposit
-            /// 3 = Storage
+            /// 1 = Main
+            /// 2 = Storage
             /// </summary>
             public int jobId { get; set; }
 
