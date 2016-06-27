@@ -50,13 +50,16 @@ namespace Devkun
             string[] itemSpl = item.Split(';');
             long assetId, classId;
 
-            if (long.TryParse(itemSpl[0], out assetId) && long.TryParse(itemSpl[1], out classId))
+            if (itemSpl.Count() == 2)
             {
-                return new Config.Item()
+                if (long.TryParse(itemSpl[0], out assetId) && long.TryParse(itemSpl[1], out classId))
                 {
-                    AssetId = assetId,
-                    ClassId = classId
-                };
+                    return new Config.Item()
+                    {
+                        AssetId = assetId,
+                        ClassId = classId
+                    };
+                }
             }
 
             return null;

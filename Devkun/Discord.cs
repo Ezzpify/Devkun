@@ -66,6 +66,8 @@ namespace Devkun
             Codes,
             Restart,
             Status,
+            Offers,
+            RemoveOffer,
             Pause,
             PauseAll,
             Unpause,
@@ -89,6 +91,7 @@ namespace Devkun
             {
                 x.AppName = "CSGO-Raffle";
                 x.AppUrl = "http://www.csgo-raffle.com";
+                x.AppVersion = "1.0";
                 x.MessageCacheSize = 0;
                 x.UsePermissionsCache = true;
                 x.EnablePreUpdateEvents = true;
@@ -122,8 +125,8 @@ namespace Devkun
                 {
                     try
                     {
-                        await mClient.Connect(mSettings.token);
-                        mClient.SetGame(mSettings.displayGame);
+                        await mClient.Connect(mSettings.accessToken);
+                        mClient.SetGame(mSettings.gameName);
                         break;
                     }
                     catch (Exception ex)
@@ -144,6 +147,10 @@ namespace Devkun
         private void MClient_Ready(object sender, EventArgs e)
         {
             mLog.Write(Log.LogLevel.Info, $"Discord has connected!");
+
+            mClient.CurrentUser.Edit("", mSettings.displayName);
+            mClient.SetGame(mSettings.gameName);
+
             RegisterCommands();
             mConnected = true;
         }
@@ -181,59 +188,63 @@ namespace Devkun
         /// </summary>
         private void RegisterCommands()
         {
-            var comService = new CommandService(new CommandServiceConfigBuilder
+            var comService = new CommandService(
+                new CommandServiceConfigBuilder
             {
                 AllowMentionPrefix = false,
                 PrefixChar = '!',
                 HelpMode = HelpMode.Disabled
             });
             
-            /*Replies with all available commands*/
             comService.CreateCommand("help")
                 .AddCheck(PermissionChecker.Admin)
-                .Parameter("string", ParameterType.Optional)
+                .Description("Posts all the available commands")
                 .Do(e => { mSession.OnDiscordHelp(e); });
             
-            /*PMs the user all the access codes for running bots*/
             comService.CreateCommand("codes")
                 .AddCheck(PermissionChecker.Admin)
-                .Parameter("string", ParameterType.Optional)
+                .Description("Messages all the access codes for the running bots.")
                 .Do(e => { mSession.OnDiscordCodes(e); });
             
-            /*Restarts all active bots*/
             comService.CreateCommand("restart")
                 .AddCheck(PermissionChecker.Admin)
-                .Parameter("string", ParameterType.Optional)
+                .Description("Pauses all actions and restarts bots")
                 .Do(e => { mSession.OnDiscordRestart(e); });
             
-            /*Posts a good amount of information about the session*/
             comService.CreateCommand("status")
                 .AddCheck(PermissionChecker.Admin)
-                .Parameter("string", ParameterType.Optional)
+                .Description("Posts session information")
                 .Do(e => { mSession.OnDiscordStatus(e); });
             
-            /*Pauses incoming trades*/
+            comService.CreateCommand("offers")
+                .AddCheck(PermissionChecker.Admin)
+                .Description("Posts all active offers")
+                .Do(e => { mSession.OnDiscordGetOffers(e); });
+            
+            comService.CreateCommand("removeoffer")
+                .AddCheck(PermissionChecker.Admin)
+                .Description("Remove trade offer from list")
+                .Parameter("queueid", ParameterType.Required)
+                .Do(e => { mSession.OnDiscordRemoveOffer(e); });
+            
             comService.CreateCommand("pause")
                 .AddCheck(PermissionChecker.Admin)
-                .Parameter("string", ParameterType.Optional)
+                .Description("Pauses deposits & withdraws")
                 .Do(e => { mSession.OnDiscordPause(e); });
             
-            /*Pauses all trade processing*/
             comService.CreateCommand("pauseall")
                 .AddCheck(PermissionChecker.Admin)
-                .Parameter("string", ParameterType.Optional)
+                .Description("Pauses deposits & withdraws, but also active offers")
                 .Do(e => { mSession.OnDiscordPauseAll(e); });
-
-            /*Unpauses session*/
+            
             comService.CreateCommand("unpause")
                 .AddCheck(PermissionChecker.Admin)
-                .Parameter("string", ParameterType.Optional)
+                .Description("Unpauses any pause status")
                 .Do(e => { mSession.OnDiscordUnpause(e); });
-
-            /*Clears all trade offers active*/
+            
             comService.CreateCommand("clear")
                 .AddCheck(PermissionChecker.Admin)
-                .Parameter("string", ParameterType.Optional)
+                .Description("Clears all active trade offers")
                 .Do(e => { mSession.OnDiscordClear(e); });
 
             mClient.AddService(comService);
@@ -251,7 +262,7 @@ namespace Devkun
             /*If the provided Channel is null then we'll fetch our main channel
             which has been specified in the application settings json file*/
             if (channel == null)
-                chan = mClient.GetChannel(mSettings.channelId);
+                chan = mClient.GetChannel(mSettings.mainChannelId);
             else
                 chan = channel;
 

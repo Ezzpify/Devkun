@@ -12,12 +12,22 @@ namespace Devkun
     static class Website
     {
         /// <summary>
-        /// 
+        /// Downloads the pending trade json from the website
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Returns string</returns>
         public static string GetTrades()
         {
             return DownloadString("http://www.mesosus.com/API/BOTAPI/GetDeposits.php");
+        }
+
+
+        /// <summary>
+        /// Posts a message to the website chat
+        /// </summary>
+        /// <param name="msg">String to post</param>
+        public static void PostMessageToWebChat(string msg)
+        {
+            DownloadString(EndPoints.Website.GetChatUrl(HttpUtility.UrlEncode(msg)));
         }
 
 

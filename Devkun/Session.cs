@@ -60,6 +60,12 @@ namespace Devkun
 
 
         /// <summary>
+        /// Represents the state of the two threads
+        /// </summary>
+        private bool mQueueSleeping, mWorkSleeping;
+
+
+        /// <summary>
         /// Our item database
         /// </summary>
         private Database mDatabase { get; set; }
@@ -127,6 +133,9 @@ namespace Devkun
             mDatabase = new Database("Database\\Items.sqlite");
             if (!mDatabase.mConnected)
                 return;
+
+            mDiscord = new Discord(this, settings.discord);
+            Console.ReadLine();
 
             if (AddBots(settings.bots))
             {
@@ -326,7 +335,11 @@ namespace Devkun
             {
                 /*If we should pause our actions*/
                 while (mSessionState == SessionState.Paused || mSessionState == SessionState.Locked)
+                {
+                    mWorkSleeping = true;
                     Thread.Sleep(500);
+                }
+                mWorkSleeping = false;
 
                 /*Get trade queue from website*/
                 var tradeList = GetQueue();
@@ -456,7 +469,11 @@ namespace Devkun
             {
                 /*If we should pause our actions*/
                 while (mSessionState == SessionState.Locked)
+                {
+                    mQueueSleeping = true;
                     Thread.Sleep(500);
+                }
+                mQueueSleeping = false;
 
                 /*Add all trades from queue list to main list*/
                 if (mActiveTradesListQueue.Count > 0)
@@ -489,10 +506,7 @@ namespace Devkun
 
                     if (offer.OfferState == TradeOfferState.TradeOfferStateAccepted)
                     {
-                        /*Trade offer was accepted, so add the items to the database*/
                         deleteList.Add(trade);
-                        trade.tradeStatus.Status = (trade.tradeType == Config.TradeType.Deposit) ? Config.TradeStatusType.DepositAccepted : Config.TradeStatusType.WithdrawAccepted;
-
                         if (trade.tradeType == Config.TradeType.Deposit)
                         {
                             /*The trade was a deposit, so we'll enter the items to the database*/
@@ -500,20 +514,22 @@ namespace Devkun
                             mLog.Write(Log.LogLevel.Info, $"Items added to database");
                             trade.tradeStatus.Status = Config.TradeStatusType.DepositAccepted;
                         }
-                        else
+                        else if (trade.tradeType == Config.TradeType.Withdraw)
                         {
                             /*Set state to accepted which is final stage*/
                             /*These items will be moved to back-up database*/
                             var idList = trade.Items.Select(o => o.ID).ToList();
                             mDatabase.UpdateItems(idList, Database.ItemState.Accepted);
                             mLog.Write(Log.LogLevel.Info, $"{idList.Count} items updated in the database");
+                            trade.tradeStatus.Status = Config.TradeStatusType.WithdrawAccepted;
                         }
                     }
                     else if (offer.OfferState == TradeOfferState.TradeOfferStateActive)
                     {
                         /*Check if the age of the offer is older than what we allow*/
                         /*If it's too old we want to remove it, but only if it's a deposit trade*/
-                        if ((Functions.GetUnixTimestamp() - offer.TimeCreated) > mSettings.tradeOfferExpireTime && trade.tradeType == Config.TradeType.Deposit)
+                        if ((Functions.GetUnixTimestamp() - offer.TimeCreated) > mSettings.tradeOfferExpireTimeSeconds 
+                            && trade.tradeType == Config.TradeType.Deposit)
                         {
                             deleteList.Add(trade);
                             mLog.Write(Log.LogLevel.Info, $"Trade offer is too old");
@@ -527,7 +543,8 @@ namespace Devkun
                     {
                         /*This offer has a a state that we don't want to deal with, so we'll remove it*/
                         deleteList.Add(trade);
-                        trade.tradeStatus.Status = (trade.tradeType == Config.TradeType.Deposit) ? Config.TradeStatusType.DepositDeclined : Config.TradeStatusType.WithdrawDeclined;
+                        trade.tradeStatus.Status = (trade.tradeType == Config.TradeType.Deposit) 
+                            ? Config.TradeStatusType.DepositDeclined : Config.TradeStatusType.WithdrawDeclined;
                         
                         /*If the offer has been countered then we'll decline it, else just leave it*/
                         if (offer.OfferState == TradeOfferState.TradeOfferStateCountered)
@@ -643,6 +660,19 @@ namespace Devkun
 
 
         /// <summary>
+        /// Sets session state to locked and wait until both threads are sleeping
+        /// </summary>
+        private void LockThreadsAndWait()
+        {
+            mSessionState = SessionState.Locked;
+            while (!mWorkSleeping || !mQueueSleeping)
+            {
+                Thread.Sleep(5000);
+            }
+        }
+
+
+        /// <summary>
         /// OnDiscordHelp Callback
         /// Posts all the commands available to the channel
         /// </summary>
@@ -655,8 +685,8 @@ namespace Devkun
                 Enum.GetValues(typeof(Discord.CommandList))
                 .Cast<Discord.CommandList>().ToList());
 
-            /*PS. The first ! mark needs to be added manually
-            don't remove this when "optimizing" later on*/
+            /*PS. The first ! mark needs to be added manually.
+            Don't remove this when "optimizing" later on*/
             e.Channel.SendMessage($"Commands available: !{comStr}");
         }
 
@@ -668,7 +698,7 @@ namespace Devkun
         /// <param name="e">CommandEventArgs</param>
         public void OnDiscordCodes(CommandEventArgs e)
         {
-            string baseString = "Steam Guard Codes:";
+            string baseString = $"Active bots: {mBotList.Count}\n";
             foreach (var bot in mBotList)
                 baseString += $"\n{bot.mSettings.username}: {bot.GetSteamGuardCode()}";
             
@@ -686,18 +716,24 @@ namespace Devkun
             /*We'll need to lock all actions before restarting the
             bots to avoid conflict. We'll also sleep to make sure
             we're not exiting mid-something*/
-
-            e.Channel.SendMessage("Restarting all bots in 15 seconds.");
+            e.Channel.SendMessage("Restarting all bots...");
             mSessionState = SessionState.Locked;
-            Thread.Sleep(15000);
+            while (!mWorkSleeping || !mQueueSleeping)
+            {
+                e.Channel.SendMessage("Waiting for threads to sleep");
+                Thread.Sleep(5000);
+            }
 
+            /*Restart each bot*/
             foreach (var bot in mBotList)
             {
                 e.Channel.SendMessage($"Restarting {bot.mSettings.username}");
                 bot.Reconnect(true);
+                e.Channel.SendMessage($"Bot status: {bot.mBotState}");
             }
 
-            e.Channel.SendMessage("Done");
+            e.Channel.SendMessage("Restart completed. Starting in 10 seconds.");
+            Thread.Sleep(10000);
             mSessionState = SessionState.Active;
         }
 
@@ -744,6 +780,26 @@ namespace Devkun
 
 
         /// <summary>
+        /// Returns a comment list containing all the active offers
+        /// </summary>
+        /// <param name="e">CommandEventArgs</param>
+        public void OnDiscordGetOffers(CommandEventArgs e)
+        {
+            string builder = $"Active offers: {mActiveTradesList.Count}\n";
+            foreach (var offer in mActiveTradesList)
+            {
+                builder += $"\n{offer.SteamId}";
+                builder += $"\n     QueueId: {offer.QueId}";
+                builder += $"\n     Type: {offer.tradeType}";
+                builder += $"\n     Errors: {offer.errorCount}";
+                builder += $"\n     Status id: {offer.tradeStatus.Id}\n";
+            }
+
+            e.Channel.SendMessage($"```{builder}```");
+        }
+
+
+        /// <summary>
         /// OnDiscordPause Callback
         /// Sets the bot in Paused state
         /// </summary>
@@ -786,9 +842,30 @@ namespace Devkun
         /// <param name="e">CommandEventArgs</param>
         public void OnDiscordClear(CommandEventArgs e)
         {
+            /*Need to pause all actions before we modify trades*/
+            LockThreadsAndWait();
+
+            /*Clear the offers*/
             mActiveTradesList.Clear();
             mActiveTradesListQueue.Clear();
             e.Channel.SendMessage("All trades have been cleared");
+            mSessionState = SessionState.Active;
+        }
+
+
+        /// <summary>
+        /// Removes active trade offer from list by queue id
+        /// </summary>
+        /// <param name="e">CommandEventArgs</param>
+        public void OnDiscordRemoveOffer(CommandEventArgs e)
+        {
+            /*Need to pause all actions before we modify trades*/
+            LockThreadsAndWait();
+
+            /*Remove all matching offers*/
+            int result = mActiveTradesList.RemoveAll(o => o.QueId == e.GetArg(0));
+            e.Channel.SendMessage($"Removed {result} active trade offers");
+            mSessionState = SessionState.Active;
         }
     }
 }

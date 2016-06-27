@@ -13,13 +13,20 @@ namespace Devkun
             /// <summary>
             /// How long a trade offer should remain active
             /// </summary>
-            public int tradeOfferExpireTime { get; set; }
+            public int tradeOfferExpireTimeSeconds { get; set; }
 
 
             /// <summary>
             /// How many items we should store on each bot
             /// </summary>
             public int itemLimitPerBot { get; set; }
+
+
+            /// <summary>
+            /// How many items the host bot can have before before we
+            /// send items to storage bots
+            /// </summary>
+            public int hostItemLimit { get; set; }
 
 
             /// <summary>
@@ -44,19 +51,25 @@ namespace Devkun
             /// <summary>
             /// Discord bot token
             /// </summary>
-            public string token { get; set; }
+            public string accessToken { get; set; }
+
+
+            /// <summary>
+            /// Discord display name
+            /// </summary>
+            public string displayName { get; set; }
 
 
             /// <summary>
             /// Discord display game title
             /// </summary>
-            public string displayGame { get; set; }
+            public string gameName { get; set; }
 
 
             /// <summary>
             /// Discord channel on the server on which we post message to
             /// </summary>
-            public ulong channelId { get; set; }
+            public ulong mainChannelId { get; set; }
         }
 
 

@@ -65,12 +65,35 @@ namespace Devkun
 
 
             /// <summary>
+            /// Website bot chat location
+            /// </summary>
+            public static string WEBSITE_CHAT_END = "/botchatmess.php?msg=";
+
+
+            /// <summary>
+            /// Website bot chat token
+            /// </summary>
+            public static string WEBSITE_CHAT_TOKEN = "&sec=sectokenlelurmomneverlovedu";
+
+
+            /// <summary>
             /// Returns the process url
             /// </summary>
             /// <returns>Returns uri string</returns>
             public static string GetProcessUrl()
             {
                 return HOST_URL + PROCESS_URL_END;
+            }
+
+
+            /// <summary>
+            /// Returns formatted chat url
+            /// </summary>
+            /// <param name="encodedMsg">UrlEncoded msg</param>
+            /// <returns>Returns uri string</returns>
+            public static string GetChatUrl(string encodedMsg)
+            {
+                return $"{HOST_URL + WEBSITE_CHAT_END + encodedMsg + WEBSITE_CHAT_TOKEN}";
             }
         }
 
