@@ -63,7 +63,13 @@ namespace Devkun
             /// <summary>
             /// Item has been accepted by user, this can be moved to history
             /// </summary>
-            Accepted
+            Accepted,
+
+
+            /// <summary>
+            /// Item that has been put on hold that will be sent to storage
+            /// </summary>
+            OnHold
         }
 
 
@@ -246,7 +252,7 @@ namespace Devkun
         /// </summary>
         /// <param name="ids">List of ids that we should update</param>
         /// <param name="state">What state we should update them to</param>
-        public void UpdateItems(List<int> ids, ItemState state)
+        public void UpdateItemStates(List<int> ids, ItemState state)
         {
             using (var transaction = mSqlCon.BeginTransaction())
             {
@@ -271,12 +277,41 @@ namespace Devkun
 
 
         /// <summary>
+        /// Updates the bot owner of items
+        /// </summary>
+        /// <param name="trade">tradeobject</param>
+        /// <param name="ownerId">owner to update to</param>
+        public void UpdateItemOwners(Config.TradeObject trade)
+        {
+            using (var transaction = mSqlCon.BeginTransaction())
+            {
+                foreach (var item in trade.Items)
+                {
+                    using (var cmd = new SQLiteCommand($"UPDATE items SET BotOwner = {trade.SteamId} WHERE ID = {item.ID}", mSqlCon))
+                    {
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                try
+                {
+                    transaction.Commit();
+                }
+                catch (Exception ex)
+                {
+                    mLog.Write(Log.LogLevel.Info, $"Error updating items ex: {ex.Message}");
+                }
+            }
+        }
+
+
+        /// <summary>
         /// Static find entry function that returns a list of item entries depending on key given
         /// </summary>
         /// <param name="lookup">What column we should match with</param>
         /// <param name="key">Key to find in column</param>
         /// <returns>Returns list of ItemEntry</returns>
-        public List<Config.Item> FindEntry(DBCols lookup, string key)
+        public List<Config.Item> FindEntries(DBCols lookup, string key)
         {
             var itemList = new List<Config.Item>();
             

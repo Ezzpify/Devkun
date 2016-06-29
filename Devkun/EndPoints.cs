@@ -107,6 +107,12 @@ namespace Devkun
             /// String for steam status json page
             /// </summary>
             public static string STEAM_STATUS_URL = "https://crowbar.steamdb.info/Barney";
+
+
+            /// <summary>
+            /// Security string for in-house storage trade offers
+            /// </summary>
+            public static string STORAGE_MESSAGE = "LuGOmfJgNT1bMHZMPO9Z";
         }
     }
 }

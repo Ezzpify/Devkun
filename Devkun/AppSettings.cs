@@ -17,6 +17,12 @@ namespace Devkun
 
 
             /// <summary>
+            /// How many items can be sent at once in a storage trade offer
+            /// </summary>
+            public int storageTradeOfferMaxItems { get; set; }
+
+
+            /// <summary>
             /// How many items we should store on each bot
             /// </summary>
             public int itemLimitPerBot { get; set; }

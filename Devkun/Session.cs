@@ -16,6 +16,12 @@ namespace Devkun
     class Session
     {
         /// <summary>
+        /// List of active storage trades
+        /// </summary>
+        private List<Config.TradeObject> mActiveStorageTradesList { get; set; } = new List<Config.TradeObject>();
+
+
+        /// <summary>
         /// List of active trades queue
         /// These items will be added to mActiveTradesList
         /// </summary>
@@ -134,9 +140,6 @@ namespace Devkun
             if (!mDatabase.mConnected)
                 return;
 
-            mDiscord = new Discord(this, settings.discord);
-            Console.ReadLine();
-
             if (AddBots(settings.bots))
             {
                 /*Find first host bot in our list and assign it as host*/
@@ -160,21 +163,17 @@ namespace Devkun
                 mQueueWorker.RunWorkerAsync();
 
                 /*Start the daily scheduled restart timer*/
-                mScheduledRestartTimer = new System.Timers.Timer();
-                mScheduledRestartTimer.Interval = (new TimeSpan(08, 00, 00) - DateTime.Now.TimeOfDay).TotalMilliseconds;
-                mScheduledRestartTimer.Elapsed += new ElapsedEventHandler(ScheduledDailyRestart);
-                mScheduledRestartTimer.Start();
+                //mScheduledRestartTimer = new System.Timers.Timer();
+                //mScheduledRestartTimer.Interval = (new TimeSpan(08, 00, 00) - DateTime.Now.TimeOfDay).TotalMilliseconds;
+                //mScheduledRestartTimer.Elapsed += new ElapsedEventHandler(ScheduledDailyRestart);
+                //mScheduledRestartTimer.Start();
 
                 /*Connect to Discord*/
                 mDiscord = new Discord(this, settings.discord);
 
-                /*Clear console of all the junk*/
-                mLog.Write(Log.LogLevel.Info, $"Finished loading bots. Clearing console...", false);
-                Thread.Sleep(1000);
-                Console.Clear();
-
                 /*We'll pause here until either thread breaks*/
                 /*It will go be on a loop until either of the threads die*/
+                Console.Clear();
                 while (mTradeWorker.IsBusy && mQueueWorker.IsBusy)
                     Thread.Sleep(1000);
 
@@ -368,10 +367,90 @@ namespace Devkun
                     }
                 }
 
+                /*Check if we have enough items to send them to storage*/
+                /*To avoid checking every single loop, just check when we've dealt with a trade*/
+                if (tradeList.Count > 0)
+                    SendItemsToStorage();
+
                 /*Authenticate trades*/
                 Website.UpdateTrade(tradeList);
                 mBotHost.ConfirmTrades();
                 Thread.Sleep(5000);
+            }
+        }
+
+
+        /// <summary>
+        /// Sends items to storage bots
+        /// </summary>
+        private void SendItemsToStorage()
+        {
+            /*Check how many items in the database that belongs to the host bot*/
+            var hostItemList = mDatabase.FindEntries(Database.DBCols.BotOwner, mBotHost.GetBotSteamId64().ToString());
+            mLog.Write(Log.LogLevel.Debug, $"Host owns {hostItemList.Count} items");
+            if (hostItemList.Count >= mSettings.hostItemLimit)
+            {
+                mLog.Write(Log.LogLevel.Info, $"We have {hostItemList.Count} items stored on Host. Moving some to storage.");
+
+                /*Go through all storage bots*/
+                foreach (var bot in mBotList.Where(o => o.mBotType == Bot.BotType.Storage))
+                {
+                    /*Load the inventory and skip if we have too many items*/
+                    var inventory = bot.GetInventory(true);
+                    if (inventory.Count() >= mSettings.itemLimitPerBot)
+                        continue;
+
+                    /*Get amount of free slots on the bot
+                    Although we need to limit it by n to ensure a stable offer*/
+                    int inventorySlots = mSettings.itemLimitPerBot - inventory.Count();
+                    if (inventorySlots > mSettings.storageTradeOfferMaxItems)
+                        inventorySlots = mSettings.storageTradeOfferMaxItems;
+
+                    /*Take items from the original list
+                    We also need to make sure we have more than one item to trade*/
+                    var itemList = hostItemList.Take(inventorySlots).ToList();
+                    if (itemList.Count() > 0)
+                    {
+                        /*Set up a trade object to the storage bot*/
+                        var trade = new Config.TradeObject()
+                        {
+                            /*For items we need to first get the updated assetId*/
+                            Items = FindUpdatedItems(mBotHost.GetInventory(), itemList),
+                            RU_Token = bot.mSettings.tradeToken,
+                            SteamId = bot.GetBotSteamId64(),
+                            tradeType = Config.TradeType.Withdraw,
+                            tradeStatus = new Config.TradeStatus()
+                        };
+
+                        /*Send trade offer from host bot to this bot*/
+                        var offerId = mBotHost.SendTradeOffer(trade, EndPoints.Steam.STORAGE_MESSAGE);
+                        if (string.IsNullOrWhiteSpace(offerId))
+                        {
+                            mLog.Write(Log.LogLevel.Error, $"Storage offer failed to send? Beep boop error pls fix");
+                        }
+                        else
+                        {
+                            /*Set the trade link for this trade*/
+                            trade.tradeStatus.Tradelink = offerId;
+
+                            /*Add items sent to used items in the database*/
+                            mLog.Write(Log.LogLevel.Success, $"Storage offer sent to bot {bot.mSettings.username}");
+                            var assetList = trade.Items.Select(o => o.AssetId).ToList();
+                            mDatabase.InsertUsedItems(assetList);
+
+                            /*Set item state to storage sent*/
+                            var idList = trade.Items.Select(o => o.ID).ToList();
+                            mDatabase.UpdateItemStates(idList, Database.ItemState.OnHold);
+                            mLog.Write(Log.LogLevel.Info, $"{idList.Count} items updated in the database");
+                            mActiveStorageTradesList.Add(trade);
+                        }
+                    }
+
+                    /*Since we got this far then we can stop checking*/
+                    break;
+                }
+
+                Thread.Sleep(1500);
             }
         }
 
@@ -384,7 +463,7 @@ namespace Devkun
         {
             /*Attempt to send the trade offer to user*/
             mLog.Write(Log.LogLevel.Info, $"Attempting to send deposit trade offer to {trade.SteamId}");
-            string offerId = mBotHost.SendTradeOffer(trade, Config.TradeType.Deposit, $"{EndPoints.Website.DOMAIN.ToUpper()} DEPOSIT | {trade.SecurityToken}");
+            string offerId = mBotHost.SendTradeOffer(trade, $"{EndPoints.Website.DOMAIN.ToUpper()} DEPOSIT | {trade.SecurityToken}");
 
             if (string.IsNullOrWhiteSpace(offerId))
             {
@@ -414,21 +493,64 @@ namespace Devkun
             /*Get all items from database*/
             var itemList = new List<Config.Item>();
             foreach (var item in trade.Items.GroupBy(o => o.ClassId).Select(q => q.First()))
-                itemList.AddRange(mDatabase.FindEntry(Database.DBCols.ClassId, item.ClassId.ToString()));
+                itemList.AddRange(mDatabase.FindEntries(Database.DBCols.ClassId, item.ClassId.ToString()));
 
             /*Sort them so we'll best the best possible bots*/
             itemList = Functions.SortDBItems(itemList, trade.Items);
             mLog.Write(Log.LogLevel.Info, $"Found {itemList.Count} perfect items. Requested count: {trade.Items.Count}");
 
+            /*We won't really do anything about this, but it's good to keep track of*/
             if (itemList.Count < trade.Items.Count)
                 mLog.Write(Log.LogLevel.Error, $"We found less items than what was requested");
 
+            /*Group up all the items depending on the owner*/
+            var itemGroups = itemList.GroupBy(o => o.BotOwner);
+
+            /*Go through all the groups*/
+            foreach (var group in itemGroups)
+            {
+                /*Find the bot that owns this item based on steamid*/
+                var bot = mBotList.Find(o => o.GetBotSteamId64() == group.Key);
+
+                /*Make sure we don't want to send a trade from hostbot to hostbot*/
+                if (bot.GetBotSteamId64() == mBotHost.GetBotSteamId64())
+                    continue;
+
+                /*Set up a trade object*/
+                var storageTrade = new Config.TradeObject()
+                {
+                    Items = FindUpdatedItems(bot.GetInventory(), group.ToList()),
+                    RU_Token = mBotHost.mSettings.tradeToken,
+                    SteamId = mBotHost.GetBotSteamId64(),
+                    tradeType = Config.TradeType.Withdraw,
+                    tradeStatus = new Config.TradeStatus()
+                };
+
+                /*Send the trade offer*/
+                var storeOfferId = bot.SendTradeOffer(storageTrade, EndPoints.Steam.STORAGE_MESSAGE);
+                if (string.IsNullOrWhiteSpace(storeOfferId))
+                {
+                    mLog.Write(Log.LogLevel.Error, $"Inhouse offer wasn't sent");
+                }
+                else
+                {
+                    mLog.Write(Log.LogLevel.Success, $"Inhouse trade offer sent");
+                    Thread.Sleep(1000);
+                    bot.ConfirmTrades();
+                }
+
+                Console.WriteLine($"Boop: {storeOfferId}");
+            }
+
+            /*Accept all trades on hostbot*/
+            mBotHost.GetOffers();
+            
             /*Get the new itemids for each item*/
             trade.Items = FindUpdatedItems(mBotHost.GetInventory(), itemList);
 
             /*Send the trade offer*/
             mLog.Write(Log.LogLevel.Info, $"Attempting to send withdraw trade offer to {trade.SteamId}");
-            string offerId = mBotHost.SendTradeOffer(trade, Config.TradeType.Withdraw, $"{EndPoints.Website.DOMAIN.ToUpper()} DEPOSIT | {trade.SecurityToken}");
+            string offerId = mBotHost.SendTradeOffer(trade, $"{EndPoints.Website.DOMAIN.ToUpper()} DEPOSIT | {trade.SecurityToken}");
 
             if (string.IsNullOrWhiteSpace(offerId))
             {
@@ -449,7 +571,7 @@ namespace Devkun
 
                 /*Set state to sent which means that next withdraw won't pick the same items*/
                 var idList = trade.Items.Select(o => o.ID).ToList();
-                mDatabase.UpdateItems(idList, Database.ItemState.Sent);
+                mDatabase.UpdateItemStates(idList, Database.ItemState.Sent);
                 mLog.Write(Log.LogLevel.Info, $"{idList.Count} items updated in the database");
                 mActiveTradesListQueue.Add(trade);
             }
@@ -502,8 +624,6 @@ namespace Devkun
 
                     /*Get the state of the offer*/
                     mLog.Write(Log.LogLevel.Info, $"Trade offer status: {offer.OfferState}");
-                    trade.offerState = offer.OfferState;
-
                     if (offer.OfferState == TradeOfferState.TradeOfferStateAccepted)
                     {
                         deleteList.Add(trade);
@@ -519,7 +639,7 @@ namespace Devkun
                             /*Set state to accepted which is final stage*/
                             /*These items will be moved to back-up database*/
                             var idList = trade.Items.Select(o => o.ID).ToList();
-                            mDatabase.UpdateItems(idList, Database.ItemState.Accepted);
+                            mDatabase.UpdateItemStates(idList, Database.ItemState.Accepted);
                             mLog.Write(Log.LogLevel.Info, $"{idList.Count} items updated in the database");
                             trade.tradeStatus.Status = Config.TradeStatusType.WithdrawAccepted;
                         }
@@ -555,9 +675,43 @@ namespace Devkun
                     }
                 }
 
+                /*Go through all storage offers*/
+                foreach (var trade in mActiveStorageTradesList)
+                {
+                    /*Try to get the trade offer state*/
+                    mLog.Write(Log.LogLevel.Info, $"Checking active storage trade offer");
+
+                    /*Get updated trade offer from api*/
+                    TradeOffer offer = mBotHost.GetTradeOffer(trade.tradeStatus.Tradelink);
+                    if (offer == null)
+                    {
+                        mLog.Write(Log.LogLevel.Warn, $"Trade offer returned null");
+                        trade.errorCount++;
+                        continue;
+                    }
+
+                    /*Get offers for the bot that has the offer pending*/
+                    var bot = mBotList.FirstOrDefault(o => o.GetBotSteamId64() == trade.SteamId);
+                    bot?.GetOffers();
+
+                    /*We only care if it's active*/
+                    if (offer.OfferState == TradeOfferState.TradeOfferStateAccepted)
+                    {
+                        /*Offer was accepted, so we'll first update the owners and then set the itemstate back to active (0)*/
+                        mLog.Write(Log.LogLevel.Info, $"Storage trade offer accepted. Updating items.");
+                        mDatabase.UpdateItemOwners(trade);
+                        var idList = trade.Items.Select(o => o.ID).ToList();
+                        mDatabase.UpdateItemStates(idList, Database.ItemState.Active);
+                        deleteList.Add(trade);
+                    }
+                }
+
                 /*Remove all changed offers from the active trade list*/
                 if (deleteList.Count > 0)
+                {
                     mActiveTradesList = mActiveTradesList.Except(deleteList).ToList();
+                    mActiveStorageTradesList = mActiveStorageTradesList.Except(deleteList).ToList();
+                }
 
                 Website.UpdateTrade(deleteList);
                 Thread.Sleep(7000);
@@ -667,6 +821,7 @@ namespace Devkun
             mSessionState = SessionState.Locked;
             while (!mWorkSleeping || !mQueueSleeping)
             {
+                mLog.Write(Log.LogLevel.Info, $"Waiting for threads to sleep");
                 Thread.Sleep(5000);
             }
         }
@@ -679,15 +834,11 @@ namespace Devkun
         /// <param name="e">CommandEventArgs</param>
         public void OnDiscordHelp(CommandEventArgs e)
         {
-            /*We'll convert all enum values to their text variant
-            and join them together in a nice string.*/
-            string comStr = string.Join(", !", 
-                Enum.GetValues(typeof(Discord.CommandList))
-                .Cast<Discord.CommandList>().ToList());
+            string baseString = "Available commands:\n";
+            foreach (var command in mDiscord.CommandDictionary)
+                baseString += $"\n{command.Key} - {command.Value}";
 
-            /*PS. The first ! mark needs to be added manually.
-            Don't remove this when "optimizing" later on*/
-            e.Channel.SendMessage($"Commands available: !{comStr}");
+            e.Channel.SendMessage($"```{baseString}```");
         }
 
 
@@ -713,16 +864,7 @@ namespace Devkun
         /// <param name="e">CommandEventArgs</param>
         public void OnDiscordRestart(CommandEventArgs e)
         {
-            /*We'll need to lock all actions before restarting the
-            bots to avoid conflict. We'll also sleep to make sure
-            we're not exiting mid-something*/
-            e.Channel.SendMessage("Restarting all bots...");
-            mSessionState = SessionState.Locked;
-            while (!mWorkSleeping || !mQueueSleeping)
-            {
-                e.Channel.SendMessage("Waiting for threads to sleep");
-                Thread.Sleep(5000);
-            }
+            LockThreadsAndWait();
 
             /*Restart each bot*/
             foreach (var bot in mBotList)
@@ -842,7 +984,6 @@ namespace Devkun
         /// <param name="e">CommandEventArgs</param>
         public void OnDiscordClear(CommandEventArgs e)
         {
-            /*Need to pause all actions before we modify trades*/
             LockThreadsAndWait();
 
             /*Clear the offers*/
@@ -859,7 +1000,6 @@ namespace Devkun
         /// <param name="e">CommandEventArgs</param>
         public void OnDiscordRemoveOffer(CommandEventArgs e)
         {
-            /*Need to pause all actions before we modify trades*/
             LockThreadsAndWait();
 
             /*Remove all matching offers*/

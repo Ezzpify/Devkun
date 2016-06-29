@@ -383,14 +383,14 @@ namespace Devkun
         /// <param name="message">Message to include in offer</param>
         /// <param name="itemList">List of item ids</param>
         /// <returns>Returns empty string if failed, else offerid</returns>
-        public string SendTradeOffer(Config.TradeObject trade, Config.TradeType tradeType, string message)
+        public string SendTradeOffer(Config.TradeObject trade, string message)
         {
             var offer = mSteam.TradeOfferManager.NewOffer(trade.SteamId);
-            mLogOffer.Write(Log.LogLevel.Debug, $"Created new trade offer to user {trade.SteamId} to {tradeType} with security token {trade.SecurityToken}.");
+            mLogOffer.Write(Log.LogLevel.Debug, $"Created new trade offer to user {trade.SteamId} to {trade.tradeType} with security token {trade.SecurityToken}.");
 
             foreach (var item in trade.Items)
             {
-                switch (tradeType)
+                switch (trade.tradeType)
                 {
                     /*For deposit we want to add their items*/
                     case Config.TradeType.Deposit:
@@ -492,9 +492,32 @@ namespace Devkun
         /// <param name="offer">Tradeoffer passed from event</param>
         private void TradeOfferManager_OnNewTradeOffer(TradeOffer offer)
         {
-            /*We should send a very detailed message with the offer and update database after we get it?*/
-            /*Idk*/
-            throw new NotImplementedException();
+            if (offer.Message == EndPoints.Steam.STORAGE_MESSAGE)
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    try
+                    {
+                        if (offer.Accept())
+                        {
+                            mLog.Write(Log.LogLevel.Success, $"Accepted {offer.Items.GetTheirItems().Count} items to storage");
+                            return;
+                        }
+                    }
+                    catch (WebException ex)
+                    {
+                        mLog.Write(Log.LogLevel.Debug, $"Unable to accept storage offer from {offer.PartnerSteamId}. Retrying in 3s...");
+                        Thread.Sleep(3000);
+                    }
+                }
+
+                mLog.Write(Log.LogLevel.Error, $"Could not accept storage offer...");
+            }
+            else
+            {
+                mLog.Write(Log.LogLevel.Warn, $"{offer.PartnerSteamId} tried to send {mSettings.username} a trade offer...?");
+                offer.Decline();
+            }
         }
 
 
@@ -630,6 +653,16 @@ namespace Devkun
 
 
         /// <summary>
+        /// Refreshes all offers
+        /// </summary>
+        /// <returns></returns>
+        public bool GetOffers()
+        {
+            return mSteam.TradeOfferManager.GetOffers();
+        }
+
+
+        /// <summary>
         /// Cancels a trade offer by id
         /// </summary>
         /// <param name="offerId">Trade offer id</param>
@@ -684,9 +717,11 @@ namespace Devkun
         /// </summary>
         /// <param name="reload">If we should reload the inventory or just get the old one</param>
         /// <returns>Returns simple inventory items list</returns>
-        public List<SimpleInventory.InventoryItem> GetInventory()
+        public List<SimpleInventory.InventoryItem> GetInventory(bool reload = true)
         {
-            mSteam.Inventory.Load(GetBotSteamId64(), 730, 2);
+            if (reload)
+                mSteam.Inventory.Load(GetBotSteamId64(), 730, 2);
+
             mLog.Write(Log.LogLevel.Debug, $"Loaded {mSteam.Inventory.Items.Count} items");
             return mSteam.Inventory.Items;
         }
@@ -697,11 +732,13 @@ namespace Devkun
         /// </summary>
         /// <param name="steamid">SteamId64 of user</param>
         /// <returns>Returns simple inventory items list</returns>
-        public List<SimpleInventory.InventoryItem> GetInventory(ulong steamid)
+        public List<SimpleInventory.InventoryItem> GetUserInventory(ulong steamid)
         {
-            mSteam.Inventory.Load(steamid, 730, 2);
-            mLog.Write(Log.LogLevel.Debug, $"Loaded {mSteam.Inventory.Items.Count} items from {steamid}'s inventory");
-            return mSteam.Inventory.Items;
+            var inv = new SimpleInventory(mSteam.Web);
+            inv.Load(steamid, 730, 2);
+            
+            mLog.Write(Log.LogLevel.Debug, $"Loaded {inv.Items.Count} items from {steamid}'s inventory");
+            return inv.Items;
         }
 
 

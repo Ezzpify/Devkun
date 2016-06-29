@@ -1,6 +1,7 @@
 ﻿using Discord;
 using Discord.Commands;
 using Discord.Commands.Permissions;
+using System.Collections.Generic;
 using System;
 using System.Text;
 using System.Threading.Tasks;
@@ -52,27 +53,36 @@ namespace Devkun
         /// </summary>
         public enum PermissionLevel
         {
+            /// <summary>
+            /// A user is considered an admin if he has the permission
+            /// to ban users from the current server
+            /// </summary>
             Admin,
+
+
+            /// <summary>
+            /// Regular user. No access to commands.
+            /// </summary>
             User
         }
 
 
         /// <summary>
-        /// Enum commads available
+        /// Dictionary of all available commands
         /// </summary>
-        public enum CommandList
+        public Dictionary<string, string> CommandDictionary = new Dictionary<string, string>()
         {
-            Help,
-            Codes,
-            Restart,
-            Status,
-            Offers,
-            RemoveOffer,
-            Pause,
-            PauseAll,
-            Unpause,
-            Clear
-        }
+            { "!Help", "Shows all available commands" },
+            { "!Codes", "Messages all the access codes for the running bots" },
+            { "!Restart", "Pauses all actions and restarts bots" },
+            { "!Status", "Posts session information" },
+            { "!Offers", "Posts all active offers" },
+            { "!Removeoffer", "Remove trade offer from list. (Argument: queueid)" },
+            { "!Pause", "Pauses deposits & withdraws" },
+            { "!PauseAll", "Pauses deposits & withdraws, but also active offers" },
+            { "!Unpause", "Unpauses any pause status" },
+            { "!Clear", "Clears all active trade offers" }
+        };
 
 
         /// <summary>
@@ -255,19 +265,10 @@ namespace Devkun
         /// Posts message to channel
         /// </summary>
         /// <param name="msg">String to post</param>
-        public void PostMessage(string msg, Channel channel = null)
+        public void PostMessage(string msg)
         {
-            Channel chan;
-
-            /*If the provided Channel is null then we'll fetch our main channel
-            which has been specified in the application settings json file*/
-            if (channel == null)
-                chan = mClient.GetChannel(mSettings.mainChannelId);
-            else
-                chan = channel;
-
-            if (chan != null)
-                chan.SendMessage(msg);
+            Channel chan = mClient.GetChannel(mSettings.mainChannelId);
+            chan?.SendMessage(msg);
         }
     }
 
