@@ -395,13 +395,13 @@ namespace Devkun
                     /*For deposit we want to add their items*/
                     case Config.TradeType.Deposit:
                         offer.Items.AddTheirItem(730, 2, item.AssetId);
-                        mLogOffer.Write(Log.LogLevel.Debug, $"Added their item to trade. Item ID: {item.ClassId}");
+                        mLogOffer.Write(Log.LogLevel.Debug, $"Added their item to trade. ClassID/AssetId: {item.ClassId}/{item.AssetId}");
                         break;
 
                     /*As for withdraw we want to add our items*/
                     case Config.TradeType.Withdraw:
                         offer.Items.AddMyItem(730, 2, item.AssetId);
-                        mLogOffer.Write(Log.LogLevel.Debug, $"Added my item to trade. Item ID: {item.ClassId}");
+                        mLogOffer.Write(Log.LogLevel.Debug, $"Added my item to trade. ClassID/AssetId: {item.ClassId}/{item.AssetId}");
                         break;
                 }
             }
@@ -432,8 +432,12 @@ namespace Devkun
                 }
                 catch (WebException ex)
                 {
-                    string resp = new StreamReader(ex.Response.GetResponseStream()).ReadToEnd();
-                    exceptionMsg = $"Webexeption: {resp}";
+                    var respStream = ex?.Response?.GetResponseStream();
+                    if (respStream != null)
+                    {
+                        var read = new StreamReader(respStream).ReadToEnd();
+                        exceptionMsg = $"Webexeption: {read}";
+                    }
                 }
                 catch (Exception ex)
                 {

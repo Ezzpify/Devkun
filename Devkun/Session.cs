@@ -35,6 +35,12 @@ namespace Devkun
 
 
         /// <summary>
+        /// List of pending withdraw trades that failed
+        /// </summary>
+        private List<Config.TradeObject> mPendingWithdraw { get; set; } = new List<Config.TradeObject>();
+
+
+        /// <summary>
         /// Timer that will restart the bots once a day
         /// </summary>
         private System.Timers.Timer mScheduledRestartTimer { get; set; }
@@ -150,6 +156,9 @@ namespace Devkun
                     return;
                 }
 
+                /*Connect to Discord*/
+                mDiscord = new Discord(this, settings.discord);
+
                 /*Start trade worker thread, this will send items to users*/
                 mTradeWorker = new BackgroundWorker { WorkerSupportsCancellation = true };
                 mTradeWorker.DoWork += TradeWorkerOnDoWork;
@@ -167,9 +176,6 @@ namespace Devkun
                 //mScheduledRestartTimer.Interval = (new TimeSpan(08, 00, 00) - DateTime.Now.TimeOfDay).TotalMilliseconds;
                 //mScheduledRestartTimer.Elapsed += new ElapsedEventHandler(ScheduledDailyRestart);
                 //mScheduledRestartTimer.Start();
-
-                /*Connect to Discord*/
-                mDiscord = new Discord(this, settings.discord);
 
                 /*We'll pause here until either thread breaks*/
                 /*It will go be on a loop until either of the threads die*/
@@ -340,6 +346,10 @@ namespace Devkun
                 }
                 mWorkSleeping = false;
 
+                /*We'll wait for the storage offers to complete before we continue*/
+                while (mActiveStorageTradesList.Count > 0)
+                    Thread.Sleep(500);
+
                 /*Get trade queue from website*/
                 var tradeList = GetQueue();
                 foreach (var trade in tradeList)
@@ -367,9 +377,12 @@ namespace Devkun
                     }
                 }
 
-                /*Check if we have enough items to send them to storage*/
-                /*To avoid checking every single loop, just check when we've dealt with a trade*/
-                if (tradeList.Count > 0)
+                /*Go through all pending withdraw offers that failed*/
+                foreach (var trade in mPendingWithdraw)
+                    trade.tradeStatus = HandleWithdraw(trade);
+                
+                /*We'll only send items to storage if the queue is empty*/
+                if (mActiveTradesList.Count == 0 && mActiveTradesListQueue.Count == 0)
                     SendItemsToStorage();
 
                 /*Authenticate trades*/
@@ -387,7 +400,7 @@ namespace Devkun
         {
             /*Check how many items in the database that belongs to the host bot*/
             var hostItemList = mDatabase.FindEntries(Database.DBCols.BotOwner, mBotHost.GetBotSteamId64().ToString());
-            mLog.Write(Log.LogLevel.Debug, $"Host owns {hostItemList.Count} items");
+            mLog.Write(Log.LogLevel.Debug, $"Host owns {hostItemList.Count} items that can be sent to storage");
             if (hostItemList.Count >= mSettings.hostItemLimit)
             {
                 mLog.Write(Log.LogLevel.Info, $"We have {hostItemList.Count} items stored on Host. Moving some to storage.");
@@ -414,7 +427,6 @@ namespace Devkun
                         /*Set up a trade object to the storage bot*/
                         var trade = new Config.TradeObject()
                         {
-                            /*For items we need to first get the updated assetId*/
                             Items = FindUpdatedItems(mBotHost.GetInventory(), itemList),
                             RU_Token = bot.mSettings.tradeToken,
                             SteamId = bot.GetBotSteamId64(),
@@ -430,18 +442,16 @@ namespace Devkun
                         }
                         else
                         {
-                            /*Set the trade link for this trade*/
+                            mLog.Write(Log.LogLevel.Success, $"Storage offer sent to bot {bot.mSettings.username}");
                             trade.tradeStatus.Tradelink = offerId;
 
                             /*Add items sent to used items in the database*/
-                            mLog.Write(Log.LogLevel.Success, $"Storage offer sent to bot {bot.mSettings.username}");
-                            var assetList = trade.Items.Select(o => o.AssetId).ToList();
-                            mDatabase.InsertUsedItems(assetList);
+                            mDatabase.InsertUsedItems(trade.Items.Select(o => o.AssetId).ToList());
 
                             /*Set item state to storage sent*/
                             var idList = trade.Items.Select(o => o.ID).ToList();
                             mDatabase.UpdateItemStates(idList, Database.ItemState.OnHold);
-                            mLog.Write(Log.LogLevel.Info, $"{idList.Count} items updated in the database");
+                            mLog.Write(Log.LogLevel.Info, $"{idList.Count} items updated in the database to OnHold");
                             mActiveStorageTradesList.Add(trade);
                         }
                     }
@@ -512,7 +522,8 @@ namespace Devkun
                 /*Find the bot that owns this item based on steamid*/
                 var bot = mBotList.Find(o => o.GetBotSteamId64() == group.Key);
 
-                /*Make sure we don't want to send a trade from hostbot to hostbot*/
+                /*Make sure we don't want to send a trade from hostbot to hostbot
+                because obviously that won't work, dummy. And there's no need to*/
                 if (bot.GetBotSteamId64() == mBotHost.GetBotSteamId64())
                     continue;
 
@@ -535,6 +546,8 @@ namespace Devkun
                 else
                 {
                     mLog.Write(Log.LogLevel.Success, $"Inhouse trade offer sent");
+                    mDatabase.InsertUsedItems(storageTrade.Items.Select(o => o.AssetId).ToList());
+                    storageTrade.tradeStatus.Id = storeOfferId;
                     Thread.Sleep(1000);
                     bot.ConfirmTrades();
                 }
@@ -543,10 +556,21 @@ namespace Devkun
             }
 
             /*Accept all trades on hostbot*/
+            Thread.Sleep(5000);
             mBotHost.GetOffers();
             
             /*Get the new itemids for each item*/
-            trade.Items = FindUpdatedItems(mBotHost.GetInventory(), itemList);
+            var newItemList = FindUpdatedItems(mBotHost.GetInventory(), itemList);
+            if (newItemList.Count < itemList.Count)
+            {
+                mLog.Write(Log.LogLevel.Info, $"We're missing items to withdraw. Trying again next round.");
+                return trade.tradeStatus;
+            }
+            else
+            {
+                /*Set the updated list to trade list*/
+                trade.Items = newItemList;
+            }
 
             /*Send the trade offer*/
             mLog.Write(Log.LogLevel.Info, $"Attempting to send withdraw trade offer to {trade.SteamId}");
@@ -564,10 +588,6 @@ namespace Devkun
                 mLog.Write(Log.LogLevel.Success, $"Withdraw trade offer was sent to user {trade.SteamId}");
                 trade.tradeStatus.Status = Config.TradeStatusType.WithdrawSent;
                 trade.tradeStatus.Tradelink = offerId;
-
-                /*Add items sent to used items in the database*/
-                var assetList = trade.Items.Select(o => o.AssetId).ToList();
-                mDatabase.InsertUsedItems(assetList);
 
                 /*Set state to sent which means that next withdraw won't pick the same items*/
                 var idList = trade.Items.Select(o => o.ID).ToList();
@@ -690,16 +710,19 @@ namespace Devkun
                         continue;
                     }
 
-                    /*Get offers for the bot that has the offer pending*/
+                    /*Get offers for the bot that has the offer pending and accept them*/
                     var bot = mBotList.FirstOrDefault(o => o.GetBotSteamId64() == trade.SteamId);
                     bot?.GetOffers();
 
                     /*We only care if it's active*/
                     if (offer.OfferState == TradeOfferState.TradeOfferStateAccepted)
                     {
-                        /*Offer was accepted, so we'll first update the owners and then set the itemstate back to active (0)*/
                         mLog.Write(Log.LogLevel.Info, $"Storage trade offer accepted. Updating items.");
+
+                        /*Offer was accepted, so we'll first update the owners and then set the itemstate back to active (0)*/
                         mDatabase.UpdateItemOwners(trade);
+
+                        /*Update the itemstate to be active again*/
                         var idList = trade.Items.Select(o => o.ID).ToList();
                         mDatabase.UpdateItemStates(idList, Database.ItemState.Active);
                         deleteList.Add(trade);
@@ -738,7 +761,9 @@ namespace Devkun
                 foreach (var inv in inventoryList)
                 {
                     long assetid = inv.assetId;
-                    if (item.ClassId == inv.classId && !mDatabase.IsUsedItem(assetid) && !busyItems.Contains(assetid))
+                    if (item.ClassId == inv.classId 
+                        && !mDatabase.IsUsedItem(assetid) 
+                        && !busyItems.Contains(assetid))
                     {
                         /*Class id matched, there is no record of the item already being used in the database
                         and the local list of already used items does not contain the item

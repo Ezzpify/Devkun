@@ -306,6 +306,35 @@ namespace Devkun
 
 
         /// <summary>
+        /// Updates the assetid of items
+        /// </summary>
+        /// <param name="trade">tradeobject</param>
+        /// <param name="ownerId">owner to update to</param>
+        public void UpdateItemAssetIds(Config.TradeObject trade)
+        {
+            using (var transaction = mSqlCon.BeginTransaction())
+            {
+                foreach (var item in trade.Items)
+                {
+                    using (var cmd = new SQLiteCommand($"UPDATE items SET AssetId = {item.AssetId} WHERE ID = {item.ID}", mSqlCon))
+                    {
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                try
+                {
+                    transaction.Commit();
+                }
+                catch (Exception ex)
+                {
+                    mLog.Write(Log.LogLevel.Info, $"Error updating items ex: {ex.Message}");
+                }
+            }
+        }
+
+
+        /// <summary>
         /// Static find entry function that returns a list of item entries depending on key given
         /// </summary>
         /// <param name="lookup">What column we should match with</param>
