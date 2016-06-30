@@ -96,19 +96,20 @@ namespace Devkun
                     break;
             }
 
-            string logString = string.Empty;
+            string formattedMessage = $"[{Functions.GetTimestamp()}] {level}: {str}";
 
-            if (rawMessage)
-                logString = str;
-            else
-                logString = $"[{mLogName} {Functions.GetTimestamp()}] {level}: {str}";
-            
             if (writeToConsole)
-                Console.WriteLine(logString);
-            
+                Console.WriteLine($"{mLogName} {formattedMessage}");
+
             if (logToFile)
-                mLogQueue.Add(logString);
-            
+            {
+                if (rawMessage)
+                    mLogQueue.Add(str);
+                else
+                    mLogQueue.Add(formattedMessage);
+            }
+
+
             Console.ForegroundColor = ConsoleColor.White;
             FlushLog();
         }

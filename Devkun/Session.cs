@@ -346,10 +346,6 @@ namespace Devkun
                 }
                 mWorkSleeping = false;
 
-                /*We'll wait for the storage offers to complete before we continue*/
-                while (mActiveStorageTradesList.Count > 0)
-                    Thread.Sleep(500);
-
                 /*Get trade queue from website*/
                 var tradeList = GetQueue();
                 foreach (var trade in tradeList)
@@ -380,9 +376,11 @@ namespace Devkun
                 /*Go through all pending withdraw offers that failed*/
                 foreach (var trade in mPendingWithdraw)
                     trade.tradeStatus = HandleWithdraw(trade);
-                
+
                 /*We'll only send items to storage if the queue is empty*/
-                if (mActiveTradesList.Count == 0 && mActiveTradesListQueue.Count == 0)
+                //if (mActiveTradesList.Count == 0 && mActiveTradesListQueue.Count == 0) //this might break, make sure to test this
+                if (mActiveTradesList.FindAll(o => o.tradeType == Config.TradeType.Deposit).Count == 0
+                    && mActiveTradesListQueue.FindAll(o => o.tradeType == Config.TradeType.Deposit).Count == 0)
                     SendItemsToStorage();
 
                 /*Authenticate trades*/
@@ -404,6 +402,9 @@ namespace Devkun
             if (hostItemList.Count >= mSettings.hostItemLimit)
             {
                 mLog.Write(Log.LogLevel.Info, $"We have {hostItemList.Count} items stored on Host. Moving some to storage.");
+
+                /*Set all selected items to busy so they won't be touched*/
+                mDatabase.UpdateItemStates(hostItemList.Select(o => o.ID).ToList(), Database.ItemState.Busy);
 
                 /*Go through all storage bots*/
                 foreach (var bot in mBotList.Where(o => o.mBotType == Bot.BotType.Storage))
@@ -439,6 +440,9 @@ namespace Devkun
                         if (string.IsNullOrWhiteSpace(offerId))
                         {
                             mLog.Write(Log.LogLevel.Error, $"Storage offer failed to send? Beep boop error pls fix");
+
+                            /*Since the offer failed we set all the items back to active*/
+                            mDatabase.UpdateItemStates(hostItemList.Select(o => o.ID).ToList(), Database.ItemState.Active);
                         }
                         else
                         {
@@ -472,7 +476,7 @@ namespace Devkun
         private Config.TradeStatus HandleDeposit(Config.TradeObject trade)
         {
             /*Attempt to send the trade offer to user*/
-            mLog.Write(Log.LogLevel.Info, $"Attempting to send deposit trade offer to {trade.SteamId}");
+            mLog.Write(Log.LogLevel.Info, $"Attempting to send deposit trade offer to {trade.SteamId} with token {trade.SecurityToken}");
             string offerId = mBotHost.SendTradeOffer(trade, $"{EndPoints.Website.DOMAIN.ToUpper()} DEPOSIT | {trade.SecurityToken}");
 
             if (string.IsNullOrWhiteSpace(offerId))
@@ -517,6 +521,7 @@ namespace Devkun
             var itemGroups = itemList.GroupBy(o => o.BotOwner);
 
             /*Go through all the groups*/
+            int offersSent = 0;
             foreach (var group in itemGroups)
             {
                 /*Find the bot that owns this item based on steamid*/
@@ -545,25 +550,28 @@ namespace Devkun
                 }
                 else
                 {
+                    offersSent++;
                     mLog.Write(Log.LogLevel.Success, $"Inhouse trade offer sent");
                     mDatabase.InsertUsedItems(storageTrade.Items.Select(o => o.AssetId).ToList());
                     storageTrade.tradeStatus.Id = storeOfferId;
                     Thread.Sleep(1000);
                     bot.ConfirmTrades();
                 }
-
-                Console.WriteLine($"Boop: {storeOfferId}");
             }
 
             /*Accept all trades on hostbot*/
-            Thread.Sleep(5000);
-            mBotHost.GetOffers();
+            if (offersSent > 0)
+            {
+                Thread.Sleep(3000);
+                mBotHost.GetOffers();
+            }
             
             /*Get the new itemids for each item*/
             var newItemList = FindUpdatedItems(mBotHost.GetInventory(), itemList);
             if (newItemList.Count < itemList.Count)
             {
-                mLog.Write(Log.LogLevel.Info, $"We're missing items to withdraw. Trying again next round.");
+                mLog.Write(Log.LogLevel.Info, $"We're missing items to withdraw.");
+                trade.tradeStatus.Status = Config.TradeStatusType.WithdrawDeclined;
                 return trade.tradeStatus;
             }
             else
@@ -573,8 +581,8 @@ namespace Devkun
             }
 
             /*Send the trade offer*/
-            mLog.Write(Log.LogLevel.Info, $"Attempting to send withdraw trade offer to {trade.SteamId}");
-            string offerId = mBotHost.SendTradeOffer(trade, $"{EndPoints.Website.DOMAIN.ToUpper()} DEPOSIT | {trade.SecurityToken}");
+            mLog.Write(Log.LogLevel.Info, $"Attempting to send withdraw trade offer to {trade.SteamId} with token {trade.SecurityToken}");
+            string offerId = mBotHost.SendTradeOffer(trade, $"{EndPoints.Website.DOMAIN.ToUpper()} WITHDRAW | {trade.SecurityToken}");
 
             if (string.IsNullOrWhiteSpace(offerId))
             {
@@ -592,6 +600,7 @@ namespace Devkun
                 /*Set state to sent which means that next withdraw won't pick the same items*/
                 var idList = trade.Items.Select(o => o.ID).ToList();
                 mDatabase.UpdateItemStates(idList, Database.ItemState.Sent);
+                mDatabase.InsertUsedItems(trade.Items.Select(o => o.AssetId).ToList());
                 mLog.Write(Log.LogLevel.Info, $"{idList.Count} items updated in the database");
                 mActiveTradesListQueue.Add(trade);
             }
@@ -685,6 +694,12 @@ namespace Devkun
                         deleteList.Add(trade);
                         trade.tradeStatus.Status = (trade.tradeType == Config.TradeType.Deposit) 
                             ? Config.TradeStatusType.DepositDeclined : Config.TradeStatusType.WithdrawDeclined;
+
+                        if (trade.tradeType == Config.TradeType.Withdraw)
+                        {
+                            /*If the withdraw got declined or failed, then we'll remove the used items*/
+                            mDatabase.RemoveUsedItems(trade.Items.Select(o => o.AssetId).ToList());
+                        }
                         
                         /*If the offer has been countered then we'll decline it, else just leave it*/
                         if (offer.OfferState == TradeOfferState.TradeOfferStateCountered)
@@ -723,8 +738,15 @@ namespace Devkun
                         mDatabase.UpdateItemOwners(trade);
 
                         /*Update the itemstate to be active again*/
-                        var idList = trade.Items.Select(o => o.ID).ToList();
-                        mDatabase.UpdateItemStates(idList, Database.ItemState.Active);
+                        mDatabase.UpdateItemStates(trade.Items.Select(o => o.ID).ToList(), Database.ItemState.Active);
+                        deleteList.Add(trade);
+                    }
+                    else if (offer.OfferState != TradeOfferState.TradeOfferStateNeedsConfirmation
+                        && offer.OfferState != TradeOfferState.TradeOfferStateActive)
+                    {
+                        /*For some reason the storage offer failed so we'll delete it and reset the items*/
+                        mDatabase.RemoveUsedItems(trade.Items.Select(o => o.AssetId).ToList());
+                        mDatabase.UpdateItemStates(trade.Items.Select(o => o.ID).ToList(), Database.ItemState.Active);
                         deleteList.Add(trade);
                     }
                 }
@@ -757,6 +779,9 @@ namespace Devkun
             /*Go through all the items that was requested*/
             foreach (var item in requestItems)
             {
+                /*Since we need to reset the assetid we'll set it to 0 for each item*/
+                item.AssetId = 0;
+
                 /*Go through all the items that the bot owns*/
                 foreach (var inv in inventoryList)
                 {

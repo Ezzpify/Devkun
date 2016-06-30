@@ -55,6 +55,12 @@ namespace Devkun
 
 
             /// <summary>
+            /// An item is busy
+            /// </summary>
+            Busy,
+
+
+            /// <summary>
             /// We have sent the item to a user, but not yet accepted
             /// </summary>
             Sent,
@@ -69,7 +75,13 @@ namespace Devkun
             /// <summary>
             /// Item that has been put on hold that will be sent to storage
             /// </summary>
-            OnHold
+            OnHold,
+
+
+            /// <summary>
+            /// Uh idk
+            /// </summary>
+            Error
         }
 
 
@@ -159,6 +171,34 @@ namespace Devkun
                     {
                         mLog.Write(Log.LogLevel.Info, $"Error commiting multiple items ex: {ex.Message}");
                     }
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// Inserts an item that has been sent and accepted, this can't be sent twice
+        /// </summary>
+        /// <param name="ids">List of item asset ids</param>
+        public void RemoveUsedItems(List<long> ids)
+        {
+            using (var transaction = mSqlCon.BeginTransaction())
+            {
+                foreach (var id in ids)
+                {
+                    using (var cmd = new SQLiteCommand($"DELETE FROM useditems WHERE AssetId = {id}", mSqlCon))
+                    {
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                try
+                {
+                    transaction.Commit();
+                }
+                catch (Exception ex)
+                {
+                    mLog.Write(Log.LogLevel.Info, $"Error updating items ex: {ex.Message}");
                 }
             }
         }
@@ -288,35 +328,6 @@ namespace Devkun
                 foreach (var item in trade.Items)
                 {
                     using (var cmd = new SQLiteCommand($"UPDATE items SET BotOwner = {trade.SteamId} WHERE ID = {item.ID}", mSqlCon))
-                    {
-                        cmd.ExecuteNonQuery();
-                    }
-                }
-
-                try
-                {
-                    transaction.Commit();
-                }
-                catch (Exception ex)
-                {
-                    mLog.Write(Log.LogLevel.Info, $"Error updating items ex: {ex.Message}");
-                }
-            }
-        }
-
-
-        /// <summary>
-        /// Updates the assetid of items
-        /// </summary>
-        /// <param name="trade">tradeobject</param>
-        /// <param name="ownerId">owner to update to</param>
-        public void UpdateItemAssetIds(Config.TradeObject trade)
-        {
-            using (var transaction = mSqlCon.BeginTransaction())
-            {
-                foreach (var item in trade.Items)
-                {
-                    using (var cmd = new SQLiteCommand($"UPDATE items SET AssetId = {item.AssetId} WHERE ID = {item.ID}", mSqlCon))
                     {
                         cmd.ExecuteNonQuery();
                     }

@@ -388,8 +388,17 @@ namespace Devkun
             var offer = mSteam.TradeOfferManager.NewOffer(trade.SteamId);
             mLogOffer.Write(Log.LogLevel.Debug, $"Created new trade offer to user {trade.SteamId} to {trade.tradeType} with security token {trade.SecurityToken}.");
 
+            var addedItems = new List<long>();
+
             foreach (var item in trade.Items)
             {
+                if (item.AssetId == 0)
+                {
+                    mLog.Write(Log.LogLevel.Debug, $"AssetId for this item was 0. Skipping.");
+                    break;
+                }
+
+                addedItems.Add(item.AssetId);
                 switch (trade.tradeType)
                 {
                     /*For deposit we want to add their items*/
@@ -404,6 +413,12 @@ namespace Devkun
                         mLogOffer.Write(Log.LogLevel.Debug, $"Added my item to trade. ClassID/AssetId: {item.ClassId}/{item.AssetId}");
                         break;
                 }
+            }
+
+            if (addedItems.Count == 0)
+            {
+                mLog.Write(Log.LogLevel.Warn, $"No items to add to trade");
+                return string.Empty;
             }
                 
             return RequestTradeOffer(offer, trade, message);
@@ -420,7 +435,7 @@ namespace Devkun
             string offerId = string.Empty;
             string exceptionMsg = string.Empty;
 
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < 5; i++)
             {
                 try
                 {
@@ -498,13 +513,13 @@ namespace Devkun
         {
             if (offer.Message == EndPoints.Steam.STORAGE_MESSAGE)
             {
-                for (int i = 0; i < 5; i++)
+                for (int i = 0; i < 10; i++)
                 {
                     try
                     {
                         if (offer.Accept())
                         {
-                            mLog.Write(Log.LogLevel.Success, $"Accepted {offer.Items.GetTheirItems().Count} items to storage");
+                            mLog.Write(Log.LogLevel.Success, $"Inhouse trade offer accepted {offer.Items.GetTheirItems().Count} items");
                             return;
                         }
                     }
